@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kuleshov Audio Pairing</title>
+  <style>
+    :root { --fg:#111; --bg:#f7f7f7; --card:#ffffff; --muted:#666; }
+    html, body { height: 100%; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif; color:var(--fg); background:var(--bg); }
+    .wrap { min-height: 100%; display:flex; align-items:center; justify-content:center; padding: 24px; }
+    .card { background:var(--card); width: 100%; max-width: 760px; border-radius: 16px; box-shadow: 0 20px 50px rgba(0,0,0,.08); padding: 24px; }
+    h1 { margin: 0 0 8px; font-size: clamp(22px, 3.5vw, 28px); }
+    p { color: var(--muted); margin: 6px 0 16px; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+    button { appearance:none; border:0; padding:14px 18px; border-radius: 12px; background:#111; color:#fff; font-weight:600; cursor:pointer; }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    .ghost { background:#e9e9e9; color:#111; }
+    .bad { background:#c62828; }
+    .ok { background:#2e7d32; }
+    .meta { display:grid; gap:8px; grid-template-columns: 1fr; margin-top:14px; }
+    .pill { display:inline-flex; gap:8px; align-items:center; font-size: 13px; padding: 6px 10px; background:#f0f0f0; border-radius: 999px; color:#333; }
+    .grid { display:grid; gap:10px; grid-template-columns: 1fr 1fr; }
+    label { font-size: 12px; color:#444; display:block; margin-bottom:4px; }
+    input[type="range"] { width:100%; }
+    .progress { height: 8px; background:#eee; border-radius: 999px; overflow:hidden; }
+    .bar { height:100%; width:0%; background:#111; transition: width .2s ease; }
+    .list { margin-top:10px; font-size: 13px; color:#444; }
+    code { background:#f2f2f2; padding:2px 6px; border-radius:6px; }
+    footer { margin-top:18px; font-size:12px; color:#777; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <main class="card">
+      <h1>Kuleshov Audio Pairing</h1>
+      <p>Plays one random answering‑machine message against one random ambient track at the same time. New pairing each refresh.</p>
+
+      <div class="row">
+        <button id="start">Start</button>
+        <button id="shuffle" class="ghost" disabled>Shuffle pairing</button>
+        <button id="stop" class="ghost" disabled>Stop</button>
+      </div>
+
+      <div class="meta">
+        <div class="progress" aria-hidden="true"><div class="bar" id="bar"></div></div>
+        <div class="row">
+          <span class="pill">Message: <span id="msgName">—</span></span>
+          <span class="pill">Ambient: <span id="ambName">—</span></span>
+          <span class="pill">Seed: <span id="seed">—</span></span>
+          <span class="pill">Length: <span id="len">—</span></span>
+        </div>
+        <div class="grid">
+          <div>
+            <label for="msgVol">Message volume</label>
+            <input type="range" id="msgVol" min="0" max="1" step="0.01" value="0.9" />
+          </div>
+          <div>
+            <label for="ambVol">Ambient volume</label>
+            <input type="range" id="ambVol" min="0" max="1" step="0.01" value="0.35" />
+          </div>
+        </div>
+        <div class="list">
+          <strong>Files live on your server:</strong>
+          <div>Replace the arrays in <code>FILES.messages</code> and <code>FILES.ambient</code> with your own URLs (same origin avoids CORS headaches).</div>
+        </div>
+      </div>
+
+      <footer>Tip: iOS and many browsers require a user gesture before audio can start. That’s what the <em>Start</em> button is for.</footer>
+    </main>
+  </div>
+
+  <script>
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 1) LIST YOUR FILES HERE (use relative URLs on the same origin if possible)
+  // ─────────────────────────────────────────────────────────────────────────────
+  const FILES = {
+    messages: [
+      // Example placeholders — replace with your files
+      // 'audio/messages/msg01.mp3', 'audio/messages/msg02.mp3', ...
+    ],
+    ambient: [
+      // 'audio/ambient/amb01.mp3', 'audio/ambient/amb02.mp3', ...
+    ]
+  };
+
+  // Optional: if you prefer a manifest, host a JSON file and fetch it here.
+  // Example shape: { messages: ["/path/a.mp3"], ambient: ["/path/b.mp3"] }
+  const MANIFEST_URL = null; // e.g., '/audio/manifest.json' or leave null
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 2) Utilities: seeded RNG for shareable pairings, helpers
+  // ─────────────────────────────────────────────────────────────────────────────
+  function xmur3(str){ let h=1779033703^str.length; for(let i=0;i<str.length;i++){ h=Math.imul(h^str.charCodeAt(i),3432918353); h=h<<13|h>>>19; } return function(){ h=Math.imul(h^h>>>16,2246822507); h=Math.imul(h^h>>>13,3266489909); return (h^h>>>16)>>>0; } }
+  function mulberry32(a){ return function(){ let t=a+=0x6D2B79F5; t=Math.imul(t^t>>>15,t|1); t^=t+Math.imul(t^t>>>7,t|61); return ((t^t>>>14)>>>0)/4294967296; } }
+  function pick(rng, arr){ return arr[Math.floor(rng()*arr.length)]; }
+  function formatSec(s){ const m=Math.floor(s/60); const ss=Math.round(s%60).toString().padStart(2,'0'); return `${m}:${ss}`; }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 3) Audio graph management
+  // ─────────────────────────────────────────────────────────────────────────────
+  let ctx, master, msgGain, ambGain; // nodes
+  let current = { ambSrc:null, msgSrc:null };
+  let lastAbort = null;
+
+  const ui = {
+    start: document.getElementById('start'),
+    shuffle: document.getElementById('shuffle'),
+    stop: document.getElementById('stop'),
+    bar: document.getElementById('bar'),
+    msgName: document.getElementById('msgName'),
+    ambName: document.getElementById('ambName'),
+    len: document.getElementById('len'),
+    seed: document.getElementById('seed'),
+    msgVol: document.getElementById('msgVol'),
+    ambVol: document.getElementById('ambVol'),
+  };
+
+  function ensureContext(){
+    if (!ctx) {
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      master = ctx.createGain();
+      master.gain.value = 1;
+      master.connect(ctx.destination);
+
+      msgGain = ctx.createGain();
+      ambGain = ctx.createGain();
+      msgGain.gain.value = parseFloat(ui.msgVol.value);
+      ambGain.gain.value = parseFloat(ui.ambVol.value);
+      msgGain.connect(master);
+      ambGain.connect(master);
+    }
+  }
+
+  ui.msgVol.addEventListener('input', () => { if (msgGain) msgGain.gain.setTargetAtTime(parseFloat(ui.msgVol.value), ctx.currentTime, 0.01); });
+  ui.ambVol.addEventListener('input', () => { if (ambGain) ambGain.gain.setTargetAtTime(parseFloat(ui.ambVol.value), ctx.currentTime, 0.01); });
+
+  // Graceful stop of current sources
+  function stopNow(){
+    try { if (current.msgSrc) { current.msgSrc.stop(); current.msgSrc.disconnect(); } } catch {}
+    try { if (current.ambSrc) { current.ambSrc.stop(); current.ambSrc.disconnect(); } } catch {}
+    current.msgSrc = current.ambSrc = null;
+    if (lastAbort) { lastAbort.abort(); lastAbort = null; }
+  }
+
+  async function loadBuffer(url, onProgress){
+    const ctrl = new AbortController();
+    lastAbort = ctrl;
+    const res = await fetch(url, { signal: ctrl.signal });
+    const buf = await res.arrayBuffer();
+    // decodeAudioData returns a Promise in modern browsers
+    return ctx.decodeAudioData(buf);
+  }
+
+  function setBar(p){ ui.bar.style.width = `${Math.max(0, Math.min(1,p))*100}%`; }
+
+  function pairNamesToUI(msgUrl, ambUrl){
+    ui.msgName.textContent = shortName(msgUrl);
+    ui.ambName.textContent = shortName(ambUrl);
+  }
+
+  function shortName(url){
+    try { const u = new URL(url, location.href); return decodeURIComponent(u.pathname.split('/').pop()); }
+    catch { return url.split('/').pop() || url; }
+  }
+
+  async function pickAndPlay(seedStr){
+    ensureContext();
+
+    // Choose RNG seed: ?seed=foo overrides. Else: date+reload randomness.
+    const urlSeed = new URLSearchParams(location.search).get('seed');
+    const baseSeed = urlSeed || seedStr || `${Date.now()}-${Math.random()}`;
+    ui.seed.textContent = baseSeed;
+    const rng = mulberry32(xmur3(baseSeed)());
+
+    const use = {
+      msg: pick(rng, FILES.messages),
+      amb: pick(rng, FILES.ambient)
+    };
+
+    if (!use.msg || !use.amb) {
+      alert('Add file URLs to FILES.messages and FILES.ambient at the top of the file.');
+      return;
+    }
+
+    pairNamesToUI(use.msg, use.amb);
+
+    setBar(0.05);
+    const [msgBuf, ambBuf] = await Promise.all([
+      loadBuffer(use.msg),
+      loadBuffer(use.amb)
+    ]);
+
+    // Build sources
+    const msgSrc = ctx.createBufferSource();
+    msgSrc.buffer = msgBuf;
+    msgSrc.connect(msgGain);
+
+    const ambSrc = ctx.createBufferSource();
+    ambSrc.buffer = ambBuf;
+    ambSrc.connect(ambGain);
+
+    current.msgSrc = msgSrc;
+    current.ambSrc = ambSrc;
+
+    // Choose ambient offset so that we can play for the full message length when possible
+    const msgLen = msgBuf.duration;
+    const ambLen = ambBuf.duration;
+    let ambOff = 0;
+    if (ambLen > msgLen) {
+      const rng2 = mulberry32(xmur3(baseSeed + '-offset')());
+      ambOff = rng2() * Math.max(0, ambLen - msgLen);
+    }
+
+    // Small fades
+    const now = ctx.currentTime + 0.05; // tiny scheduling offset for reliability
+    const fade = 0.75;
+
+    // Reset gains for fade in
+    msgGain.gain.setValueAtTime(0.0001, now);
+    msgGain.gain.exponentialRampToValueAtTime(parseFloat(ui.msgVol.value) || 0.9, now + fade);
+
+    ambGain.gain.setValueAtTime(0.0001, now);
+    ambGain.gain.exponentialRampToValueAtTime(parseFloat(ui.ambVol.value) || 0.35, now + fade);
+
+    // Schedule
+    msgSrc.start(now);
+    ambSrc.start(now, ambOff);
+
+    // Decide how long to run both: align to message length or available ambient tail
+    const runLen = Math.min(msgLen, Math.max(0.01, ambLen - ambOff));
+
+    // Fade out near the end
+    const endAt = now + runLen;
+    msgGain.gain.setTargetAtTime(0.0001, endAt - 0.6, 0.25);
+    ambGain.gain.setTargetAtTime(0.0001, endAt - 0.6, 0.25);
+
+    // Stop both
+    msgSrc.stop(endAt + 0.05);
+    ambSrc.stop(endAt + 0.05);
+
+    ui.len.textContent = formatSec(runLen);
+
+    // UI enable shuffle/stop
+    ui.shuffle.disabled = false;
+    ui.stop.disabled = false;
+
+    // Simple progress animation (not sample-accurate; just UX)
+    const t0 = performance.now();
+    function tick(){
+      const dt = (performance.now() - t0) / 1000;
+      setBar(Math.min(1, dt / runLen));
+      if (dt < runLen) requestAnimationFrame(tick); else setBar(1);
+    }
+    requestAnimationFrame(tick);
+  }
+
+  async function boot(){
+    // Optionally fetch manifest
+    if (MANIFEST_URL){
+      try {
+        const r = await fetch(MANIFEST_URL);
+        const j = await r.json();
+        if (Array.isArray(j.messages)) FILES.messages = j.messages;
+        if (Array.isArray(j.ambient)) FILES.ambient = j.ambient;
+      } catch (e) {
+        console.warn('Manifest fetch failed', e);
+      }
+    }
+  }
+
+  ui.start.addEventListener('click', async () => {
+    ui.start.disabled = true;
+    await boot();
+    try {
+      await ctx?.resume?.();
+    } catch {}
+    pickAndPlay('start');
+  });
+
+  ui.shuffle.addEventListener('click', async () => {
+    stopNow();
+    setBar(0);
+    try { await ctx?.resume?.(); } catch {}
+    pickAndPlay('shuffle');
+  });
+
+  ui.stop.addEventListener('click', () => {
+    stopNow();
+    setBar(0);
+    ui.stop.disabled = true;
+  });
+
+  // Prepare quickly so the first click is responsive
+  document.addEventListener('DOMContentLoaded', boot);
+  </script>
+</body>
+</html>
