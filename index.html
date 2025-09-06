@@ -34,12 +34,10 @@
   <div class="wrap">
     <main class="card">
       <h1>Kuleshov Audio Pairing</h1>
-      <p>Plays one random answering‑machine message against one random ambient track at the same time. New pairing each refresh.</p>
+      <p>Plays one random answering‑machine message against one random ambient track at the same time. Press <strong>Play</strong> to begin; refresh the page to reroll.</p>
 
       <div class="row">
-        <button id="start">Start</button>
-        <button id="shuffle" class="ghost" disabled>Shuffle pairing</button>
-        <button id="stop" class="ghost" disabled>Stop</button>
+        <button id="start">Play</button>
       </div>
 
       <div class="meta">
@@ -105,8 +103,6 @@
 
   const ui = {
     start: document.getElementById('start'),
-    shuffle: document.getElementById('shuffle'),
-    stop: document.getElementById('stop'),
     bar: document.getElementById('bar'),
     msgName: document.getElementById('msgName'),
     ambName: document.getElementById('ambName'),
@@ -240,10 +236,7 @@
     ambSrc.stop(endAt + 0.05);
 
     ui.len.textContent = formatSec(runLen);
-
-    // UI enable shuffle/stop
-    ui.shuffle.disabled = false;
-    ui.stop.disabled = false;
+    // Playback started; use refresh to reroll
 
     // Simple progress animation (not sample-accurate; just UX)
     const t0 = performance.now();
@@ -277,16 +270,8 @@
     } catch {}
     pickAndPlay('start');
   });
+  // (Shuffle/Stop buttons removed for autoplay-friendly minimalist UI)
 
-  ui.shuffle.addEventListener('click', async () => {
-    stopNow();
-    setBar(0);
-    try { await ctx?.resume?.(); } catch {}
-    pickAndPlay('shuffle');
-  });
-
-  ui.stop.addEventListener('click', () => {
-    stopNow();
     setBar(0);
     ui.stop.disabled = true;
   });
