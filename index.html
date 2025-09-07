@@ -60,7 +60,7 @@
     will-change: font-size;
   }
 
-  /* Center Play button: rectangular outline + matching text */
+  /* Center Play button */
   .playbtn{
     position: fixed;
     left: 50%; top: 50%;
@@ -93,10 +93,8 @@
 </head>
 <body>
 
-<!-- Background videos -->
-<video id="bgA" class="bgvideo show" muted loop playsinline preload="auto">
-  <source src="media/Clouds2.mp4?v=18" type="video/mp4">
-</video>
+<!-- Background videos (src set by JS) -->
+<video id="bgA" class="bgvideo show" muted loop playsinline preload="auto"></video>
 <video id="bgB" class="bgvideo" muted loop playsinline preload="auto"></video>
 
 <!-- Title -->
@@ -110,6 +108,13 @@
 <audio id="msg" preload="auto" playsinline></audio>
 
 <script>
+/* ===================== SETTINGS / VERSION ===================== */
+/* Bump VERSION whenever you push new media so caches refresh. */
+const VERSION = 30;
+
+/* Your exact ambient filename (spaces and case must match): */
+const AMBIENT_FILENAME = "Aphex Twin - Stone In Focus 4.mp3";
+
 /* -------- Auto-fit title to ONE line (never clipped) -------- */
 (function(){
   const title = document.getElementById('title');
@@ -132,9 +137,10 @@
 <script>
 /* ===================== BACKGROUND CROSSFADE (10s switch, 10s fade) ===================== */
 const BG = {
-  second: "media/Road1.mp4",   // fade to this
-  switchAfterMs: 20000,        // start fading after 10s
-  fadeMs: 20000                // fade lasts 10s
+  first:  "media/Clouds2.mp4",
+  second: "media/Road1.mp4",
+  switchAfterMs: 10000,  // start fading after 10s
+  fadeMs: 10000          // fade lasts 10s
 };
 
 (function setupBackgroundFade(){
@@ -143,6 +149,9 @@ const BG = {
   A.style.transitionDuration = BG.fadeMs + 'ms';
   B.style.transitionDuration = BG.fadeMs + 'ms';
 
+  // set sources with cache-buster
+  A.src = `${BG.first}?v=${VERSION}`;
+
   const startA = () => { try { A.play(); } catch(e){} };
   if (A.readyState >= 2) startA(); else A.addEventListener('canplay', startA, {once:true});
 
@@ -150,7 +159,7 @@ const BG = {
   function startTimer(){
     if (timerStarted) return; timerStarted = true;
     setTimeout(() => {
-      B.src = BG.second + '?v=18';
+      B.src = `${BG.second}?v=${VERSION}`;
       const go = () => {
         try { B.currentTime = 0; } catch {}
         B.play().catch(()=>{});
@@ -175,11 +184,9 @@ const BG = {
 <script>
 /* ===================== AUDIO PLAYER (LOCAL FILES) ===================== */
 const FILES = {
-  /* Ambient bucket — Aphex Twin track active here */
   ambient: [
-    "audio/ambient/Aphex Twin - Stone In Focus 4.mp3"
+    `audio/ambient/${AMBIENT_FILENAME}?v=${VERSION}`
   ],
-  /* Message clips (shuffled, no repeats per session) */
   messages: [
     "audio/messages/1.mp3","audio/messages/2.mp3","audio/messages/3.mp3","audio/messages/4.mp3",
     "audio/messages/5.mp3","audio/messages/6.mp3","audio/messages/7.mp3","audio/messages/8.mp3",
@@ -207,9 +214,9 @@ const FILES = {
 const $ = s => document.querySelector(s);
 const ui = { playBtn: $("#play"), amb: $("#amb"), msg: $("#msg") };
 
-ui.amb.loop = false;
-ui.amb.volume = 1.0;
-ui.msg.volume = 0.5;
+ui.amb.loop = false;      // don't loop the ambient (you can change later)
+ui.amb.volume = 1.0;      // music full volume
+ui.msg.volume = 0.5;      // messages half volume
 
 function shuffle(a){ const r=a.slice(); for(let i=r.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [r[i],r[j]]=[r[j],r[i]]; } return r; }
 let msgDeck = [];
@@ -233,7 +240,7 @@ function nextMessage(){
 
   let started = false, startTimer=null, stallTimer=null, lastT=0;
   function cleanup(){ if(startTimer) clearTimeout(startTimer); if(stallTimer) clearTimeout(stallTimer); }
-  function skip(){ cleanup(); nextMessage(); }
+  function skip(){ console.warn("Skipping stalled/failed message:", ui.msg.src); cleanup(); nextMessage(); }
 
   const m = ui.msg;
   m.onended = () => { cleanup(); setTimeout(nextMessage, 0); };
@@ -254,7 +261,7 @@ function nextMessage(){
   m.play().catch(()=>{});
 }
 
-/* Ambient bucket: try to play; if none/blocked, we still start messages */
+/* Ambient bucket: try to play; if none/blocked, start messages anyway */
 function clearAmbHandlers(){ ui.amb.onended = ui.amb.onerror = ui.amb.onplaying = null; }
 
 function playNextAmbient(){
@@ -272,15 +279,15 @@ function playNextAmbient(){
   const src = ambDeck.shift();
   const a = ui.amb;
 
-  a.onended = () => { playNextAmbient(); };
-  a.onerror = () => { playNextAmbient(); };
+  a.onended = () => { console.log("Ambient ended:", a.src); /* don't loop; do nothing */ };
+  a.onerror  = () => { console.warn("Ambient failed to load/play:", a.src); /* still keep PLAY hidden */ };
 
   a.onplaying = () => {
     if (!ambientStarted){
       ambientStarted = true;
       if (!messagesStarted){
         messagesStarted = true;
-        setTimeout(nextMessage, 3000);  // wait 3s after ambient actually starts
+        setTimeout(nextMessage, 3000);  // wait ~3s after ambient actually starts
       }
     }
   };
@@ -288,7 +295,8 @@ function playNextAmbient(){
   a.src = encodeURI(src);
   a.currentTime = 0;
 
-  a.play().catch(() => { showPlay(); });
+  // Keep the PLAY button hidden even on error; messages will still run
+  a.play().catch(() => {});
   try { a.load(); } catch {}
 }
 
@@ -300,22 +308,18 @@ function prime(el){
   }).catch(()=>{ el.muted = false; });
 }
 
-/* Resume nudge when returning to foreground */
+/* Resume nudges when returning to foreground */
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden && ui.msg.paused && msgDeck.length){
-    nextMessage();
+  if (!document.hidden){
+    if (ui.amb.paused && ambientStarted) { ui.amb.play().catch(()=>{}); }
+    if (ui.msg.paused && msgDeck.length) { nextMessage(); }
   }
 }, {passive:true});
 
-/* Play button: hide on press; re-show ONLY on playback error */
-function showPlay(){
-  ui.playBtn.classList.remove('hidden');
-  ui.playBtn.style.display = '';
-  ui.playBtn.disabled = false;
-}
+/* Play button: hide on press; never re-show automatically */
 function hidePlay(){
   ui.playBtn.classList.add('hidden');
-  ui.playBtn.style.display = 'none';   /* redundant, guarantees disappearance */
+  ui.playBtn.style.display = 'none';
   ui.playBtn.disabled = true;
 }
 
