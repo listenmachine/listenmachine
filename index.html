@@ -7,7 +7,7 @@
 <meta name="color-scheme" content="dark light" />
 <style>
   :root{
-    /* one knob for title + button colour/opacity */
+    /* One knob for title + button colour/opacity */
     --ui-alpha: 0.26;
     --ui-color: rgba(255,255,255,var(--ui-alpha));
   }
@@ -17,40 +17,76 @@
     margin: 0;
     background: #000;
     color: #fff;
-    overflow: hidden;
+    overflow: hidden; /* splash */
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
 
-  /* Background video */
+  /* Full-bleed background video */
   #bg-video{
-    position: fixed; inset: 0; width: 100%; height: 100%;
-    object-fit: cover; z-index: 0; pointer-events: none;
-    filter: saturate(0.9) contrast(1.05) blur(0.3px);
+    position: fixed;
+    inset: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    z-index: 0;
+    pointer-events: none;
+    filter: saturate(0.9) contrast(1.05) blur(0.3px); /* subtle VHS softness */
     background:#000;
   }
 
-  /* Title: single line, never clipped */
+  /* Title near the top, single line, never clipped */
   .title-wrap{
-    position: fixed; top: clamp(12px, 8vh, 96px); left: 50%; transform: translateX(-50%);
-    width: min(92vw, 1200px); z-index: 2; text-align: center; pointer-events: none; padding-inline: 2vw;
+    position: fixed;
+    top: clamp(12px, 8vh, 96px);
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(92vw, 1200px);
+    z-index: 2;
+    text-align: center;
+    pointer-events: none;
+    padding-inline: 2vw;
   }
   #title{
-    margin: 0; text-transform: uppercase; white-space: nowrap;
-    letter-spacing: 0.18em; font-weight: 700; line-height: 1.06;
-    color: var(--ui-color); user-select: none;
-    font-size: 8vw; will-change: font-size; /* JS will shrink to fit */
+    margin: 0;
+    text-transform: uppercase;
+    white-space: nowrap;          /* force one line */
+    letter-spacing: 0.18em;
+    font-weight: 700;
+    line-height: 1.06;
+    color: var(--ui-color);
+    user-select: none;
+
+    /* Start size; JS shrinks until it fits container width */
+    font-size: 8vw;
+    will-change: font-size;
   }
 
-  /* Buttons (rectangular outline, no fill) */
-  .btn{
-    position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%);
-    z-index: 3; display: inline-flex; align-items: center; justify-content: center;
-    padding: 14px 32px; border: clamp(3px, 0.6vw, 6px) solid var(--ui-color); border-radius: 0;
-    background: transparent; color: var(--ui-color); text-transform: uppercase;
-    font-weight: 800; letter-spacing: 0.22em; font-size: clamp(12px, 2.6vw, 18px); line-height: 1;
-    cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+  /* Center Play button: rectangular outline + matching text */
+  .playbtn{
+    position: fixed;
+    left: 50%; top: 50%;
+    transform: translate(-50%,-50%);
+    z-index: 3;
+
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    padding: 14px 32px;
+    border: clamp(3px, 0.6vw, 6px) solid var(--ui-color); /* thick stroke */
+    border-radius: 0;               /* rectangle */
+    background: transparent;        /* no fill */
+    color: var(--ui-color);         /* text matches title */
+    text-transform: uppercase;
+    font-weight: 800;
+    letter-spacing: 0.22em;
+    font-size: clamp(12px, 2.6vw, 18px);
+    line-height: 1;
+    cursor: pointer;
+
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
   }
-  .hidden{ display:none !important; }
+  .playbtn.hidden{ display:none !important; }
 
   @media (prefers-reduced-motion: reduce){
     #bg-video{ display:none; }
@@ -66,49 +102,52 @@
 </video>
 
 <!-- Title -->
-<div class="title-wrap"><h1 id="title">LISTENMACHINE</h1></div>
+<div class="title-wrap">
+  <h1 id="title">LISTENMACHINE</h1>
+</div>
 
-<!-- Buttons -->
-<button id="connect" class="btn" type="button">CONNECT SPOTIFY</button>
-<button id="play" class="btn hidden" type="button">PLAY</button>
+<!-- Center Play button -->
+<button id="play" class="playbtn" type="button" aria-label="Play">PLAY</button>
 
-<!-- Hidden local audio for messages -->
+<!-- Hidden audio elements -->
+<audio id="amb" preload="auto" playsinline></audio>
 <audio id="msg" preload="auto" playsinline></audio>
 
 <script>
-/* -------------------- CONFIG -------------------- */
-const SPOTIFY_CLIENT_ID = "PASTE_YOUR_CLIENT_ID_HERE"; // <— REQUIRED
-const SPOTIFY_REDIRECT_URI = location.origin + location.pathname; // works on GitHub Pages
-const SPOTIFY_PLAYLIST_URI = "spotify:playlist:37i9dQZF1DXbpYC8go5XtU"; // your playlist
-const SPOTIFY_SCOPES = [
-  "streaming",
-  "user-read-email",
-  "user-read-private",
-  "user-modify-playback-state",
-  "user-read-playback-state"
-];
-
-/* -------------------- TITLE AUTO-FIT (single line) -------------------- */
+/* -------- Auto-fit title to ONE line (never clipped) -------- */
 (function(){
   const title = document.getElementById('title');
   function fit(){
     const container = title.parentElement;
     const maxWidth = container.clientWidth;
-    let size = Math.min(innerWidth * 0.08, innerHeight * 0.18, 110);
+
+    // initial size relative to viewport; capped
+    let size = Math.min(window.innerWidth * 0.08, window.innerHeight * 0.18, 110); // px
     title.style.fontSize = size + 'px';
+
+    // shrink until single-line title fits container width
     let safety = 80;
     while (title.scrollWidth > (maxWidth - 1.5) && safety-- > 0){
-      size *= 0.965; title.style.fontSize = size + 'px';
+      size *= 0.965;
+      title.style.fontSize = size + 'px';
     }
   }
-  addEventListener('resize', fit, {passive:true});
-  addEventListener('orientationchange', fit, {passive:true});
-  addEventListener('load', fit);
+  window.addEventListener('resize', fit, {passive:true});
+  window.addEventListener('orientationchange', fit, {passive:true});
+  window.addEventListener('load', fit);
   setTimeout(fit, 0);
 })();
 
-/* -------------------- Minimal messages chain (shuffle + watchdog) -------------------- */
+/* -------- Local audio config -------- */
 const FILES = {
+  /* Add ALL your ambient tracks here; they'll shuffle with no repeats per session. */
+  ambient: [
+    "audio/ambient/track1.mp3",
+    "audio/ambient/track2.mp3",
+    "audio/ambient/track3.mp3"
+    // e.g. "audio/ambient/Aphex Twin - Stone In Focus 4.mp3"
+  ],
+  /* Your message clips — add/remove as you collect them */
   messages: [
     "audio/messages/1.mp3","audio/messages/2.mp3","audio/messages/3.mp3","audio/messages/4.mp3",
     "audio/messages/5.mp3","audio/messages/6.mp3","audio/messages/7.mp3","audio/messages/8.mp3",
@@ -132,14 +171,22 @@ const FILES = {
     "audio/messages/77.mp3","audio/messages/78.mp3"
   ]
 };
+
 const $ = s => document.querySelector(s);
-const ui = { connect: $("#connect"), play: $("#play"), msg: $("#msg") };
+const ui = { playBtn: $("#play"), amb: $("#amb"), msg: $("#msg") };
+
+ui.amb.loop = false;  // ambient advances to next track instead of looping one
+ui.amb.volume = 1.0;  // defaults
 ui.msg.volume = 0.5;
 
+/* Helpers */
 function shuffle(a){ const r=a.slice(); for(let i=r.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [r[i],r[j]]=[r[j],r[i]]; } return r; }
 let msgDeck = [];
+let ambDeck = [];
 function resetMsgDeck(){ msgDeck = shuffle(FILES.messages); }
+function resetAmbDeck(){ ambDeck = shuffle(FILES.ambient); }
 
+/* ------- Message chain with watchdogs (skip stalls) ------- */
 function clearMsgHandlers(){
   const m = ui.msg;
   m.onended = m.onerror = m.onstalled = m.onsuspend = m.onwaiting =
@@ -149,214 +196,88 @@ function nextMessage(){
   if (!msgDeck.length) return;
   const src = msgDeck.shift();
   clearMsgHandlers();
+
   let started = false, startTimer=null, stallTimer=null, lastT=0;
   function cleanup(){ if(startTimer) clearTimeout(startTimer); if(stallTimer) clearTimeout(stallTimer); }
   function skip(){ cleanup(); nextMessage(); }
+
   const m = ui.msg;
   m.onended = () => { cleanup(); setTimeout(nextMessage, 0); };
   m.onerror = () => { skip(); };
   m.onstalled = m.onsuspend = m.onwaiting = () => {
     if (stallTimer) clearTimeout(stallTimer);
-    stallTimer = setTimeout(skip, 8000);
+    stallTimer = setTimeout(skip, 8000); // skip if stuck
   };
   m.onloadeddata = m.oncanplay = () => { m.play().catch(()=>{}); };
-  m.onplaying = () => { started = true; if(stallTimer){clearTimeout(stallTimer);stallTimer=null;} if(startTimer){clearTimeout(startTimer);startTimer=null;} };
-  m.ontimeupdate = () => { if (m.currentTime > lastT + 0.25){ lastT = m.currentTime; if(stallTimer){clearTimeout(stallTimer);stallTimer=null;} } };
+  m.onplaying = () => { started = true; if(stallTimer){ clearTimeout(stallTimer); stallTimer=null; } if(startTimer){ clearTimeout(startTimer); startTimer=null; } };
+  m.ontimeupdate = () => {
+    if (m.currentTime > lastT + 0.25){ lastT = m.currentTime; if (stallTimer){ clearTimeout(stallTimer); stallTimer=null; } }
+  };
+
   m.src = encodeURI(src);
   try { m.load(); } catch {}
   startTimer = setTimeout(() => { if(!started) skip(); }, 12000);
   m.play().catch(()=>{});
 }
 
-/* -------------------- Spotify PKCE Auth + Web Playback SDK -------------------- */
-const SpotifyAuth = {
-  key: 'lm_spotify_token',
-  async getToken(){
-    const raw = localStorage.getItem(this.key);
-    if (!raw) return null;
-    const data = JSON.parse(raw);
-    if (Date.now() < data.expires_at - 60_000) return data; // still valid
-    // refresh
-    if (!data.refresh_token) return null;
-    const params = new URLSearchParams({
-      client_id: SPOTIFY_CLIENT_ID,
-      grant_type: 'refresh_token',
-      refresh_token: data.refresh_token
-    });
-    const res = await fetch('https://accounts.spotify.com/api/token', {
-      method: 'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: params
-    });
-    if (!res.ok) return null;
-    const j = await res.json();
-    const updated = {
-      access_token: j.access_token,
-      token_type: j.token_type,
-      expires_at: Date.now() + (j.expires_in*1000),
-      refresh_token: data.refresh_token
-    };
-    localStorage.setItem(this.key, JSON.stringify(updated));
-    return updated;
-  },
-  async authorize(){
-    const verifier = this._randomString(64);
-    const challenge = await this._challenge(verifier);
-    localStorage.setItem('lm_spotify_verifier', verifier);
-    const authUrl = new URL('https://accounts.spotify.com/authorize');
-    authUrl.searchParams.set('client_id', SPOTIFY_CLIENT_ID);
-    authUrl.searchParams.set('response_type','code');
-    authUrl.searchParams.set('redirect_uri', SPOTIFY_REDIRECT_URI);
-    authUrl.searchParams.set('code_challenge_method','S256');
-    authUrl.searchParams.set('code_challenge', challenge);
-    authUrl.searchParams.set('scope', SPOTIFY_SCOPES.join(' '));
-    location.assign(authUrl.toString());
-  },
-  async handleRedirect(){
-    const code = new URLSearchParams(location.search).get('code');
-    if (!code) return false;
-    const verifier = localStorage.getItem('lm_spotify_verifier');
-    localStorage.removeItem('lm_spotify_verifier');
-    const params = new URLSearchParams({
-      client_id: SPOTIFY_CLIENT_ID,
-      grant_type: 'authorization_code',
-      code,
-      redirect_uri: SPOTIFY_REDIRECT_URI,
-      code_verifier: verifier
-    });
-    const res = await fetch('https://accounts.spotify.com/api/token', {
-      method: 'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: params
-    });
-    if (!res.ok) { return false; }
-    const j = await res.json();
-    const data = {
-      access_token: j.access_token,
-      token_type: j.token_type,
-      expires_at: Date.now() + (j.expires_in*1000),
-      refresh_token: j.refresh_token
-    };
-    localStorage.setItem(this.key, JSON.stringify(data));
-    // clean query string
-    history.replaceState({}, '', SPOTIFY_REDIRECT_URI);
-    return true;
-  },
-  _randomString(len){
-    const arr = new Uint8Array(len); crypto.getRandomValues(arr);
-    return Array.from(arr, x => ('0'+x.toString(16)).slice(-2)).join('');
-  },
-  async _challenge(verifier){
-    const enc = new TextEncoder().encode(verifier);
-    const hash = await crypto.subtle.digest('SHA-256', enc);
-    return btoa(String.fromCharCode(...new Uint8Array(hash)))
-      .replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-  }
-};
+/* ------- Ambient bucket: advance through shuffled list, no repeats this session ------- */
+function clearAmbHandlers(){ ui.amb.onended = ui.amb.onerror = null; }
 
-let spotifyPlayer = null;
-let spotifyDeviceId = null;
+function playNextAmbient(){
+  clearAmbHandlers();
+  if (!ambDeck.length) return; // bucket exhausted -> stay quiet (button remains hidden)
+  const src = ambDeck.shift();
+  const a = ui.amb;
 
-async function ensureSpotifySDK(){
-  if (window.Spotify) return;
-  await new Promise((res, rej) => {
-    const s = document.createElement('script');
-    s.src = 'https://sdk.scdn.co/spotify-player.js';
-    s.onload = res; s.onerror = rej; document.head.appendChild(s);
-  });
-  await new Promise(res => {
-    window.onSpotifyWebPlaybackSDKReady = res;
-  });
-}
+  // move to next ambient when one ends or file missing
+  a.onended = () => { playNextAmbient(); };
+  a.onerror = () => { playNextAmbient(); };
 
-async function ensurePlayer(){
-  if (spotifyPlayer) return spotifyPlayer;
-  const tokenData = await SpotifyAuth.getToken();
-  if (!tokenData) throw new Error('NO_TOKEN');
+  a.src = encodeURI(src);
+  a.currentTime = 0;
 
-  await ensureSpotifySDK();
-  spotifyPlayer = new Spotify.Player({
-    name: 'ListenMachine Web',
-    volume: 1.0,
-    getOAuthToken: async cb => {
-      const fresh = await SpotifyAuth.getToken();
-      cb(fresh ? fresh.access_token : '');
-    }
-  });
-
-  return new Promise((resolve, reject) => {
-    spotifyPlayer.addListener('ready', ({ device_id }) => { spotifyDeviceId = device_id; resolve(spotifyPlayer); });
-    spotifyPlayer.addListener('not_ready', () => { /* device went away */ });
-    spotifyPlayer.addListener('initialization_error', ({message}) => { console.error(message); reject(new Error(message)); });
-    spotifyPlayer.addListener('authentication_error', ({message}) => { console.error(message); reject(new Error('AUTH')); });
-    spotifyPlayer.addListener('account_error', ({message}) => { console.error(message); reject(new Error('ACCOUNT')); });
-    spotifyPlayer.connect();
-  });
-}
-
-async function api(method, path, body){
-  const tokenData = await SpotifyAuth.getToken();
-  if (!tokenData) throw new Error('NO_TOKEN');
-  const url = new URL('https://api.spotify.com/v1' + path);
-  const opts = { method, headers: { 'Authorization': 'Bearer ' + tokenData.access_token } };
-  if (body !== undefined){
-    opts.headers['Content-Type'] = 'application/json';
-    opts.body = JSON.stringify(body);
-  }
-  const res = await fetch(url, opts);
-  if (!res.ok) throw new Error('API_' + res.status);
-  return res.status === 204 ? null : res.json();
-}
-
-async function startSpotifyAmbient(){
-  await ensurePlayer(); // ensures device_id
-  try {
-    // Transfer playback to our Web Player device (and start)
-    await api('PUT', '/me/player', { device_ids: [spotifyDeviceId], play: true });
-
-    // Shuffle ON
-    await api('PUT', '/me/player/shuffle?state=true&device_id=' + encodeURIComponent(spotifyDeviceId));
-
-    // Start playlist context
-    await api('PUT', '/me/player/play?device_id=' + encodeURIComponent(spotifyDeviceId), {
-      context_uri: SPOTIFY_PLAYLIST_URI
-    });
-
-    // Attempt max volume (may be ignored on some platforms)
-    try { await api('PUT', '/me/player/volume?volume_percent=100&device_id=' + encodeURIComponent(spotifyDeviceId)); } catch {}
-
-  } catch (e){
-    console.error(e);
+  // If the browser refuses to start playback even after a user gesture, show the Play button back.
+  a.play().catch(() => {
     showPlay(); // playback error -> allow retry
-  }
+  });
+
+  try { a.load(); } catch {}
 }
 
-/* -------------------- Button behavior -------------------- */
-function showPlay(){ ui.play.classList.remove('hidden'); }
-function hidePlay(){ ui.play.classList.add('hidden'); }
-function showConnect(){ ui.connect.classList.remove('hidden'); }
-function hideConnect(){ ui.connect.classList.add('hidden'); }
+/* Prime audio after user gesture (WebKit/iOS quirk) */
+function prime(el){
+  el.muted = true;
+  return el.play().then(() => {
+    el.pause(); el.currentTime = 0; el.muted = false;
+  }).catch(()=>{ el.muted = false; });
+}
 
-ui.connect.addEventListener('click', async () => {
-  if (!SPOTIFY_CLIENT_ID || /YOUR_SPOTIFY_CLIENT_ID|PASTE/.test(SPOTIFY_CLIENT_ID)){
-    alert('Please set SPOTIFY_CLIENT_ID in index.html before connecting.');
-    return;
+/* Resume nudge when returning to foreground */
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && ui.msg.paused && msgDeck.length){
+    nextMessage();
   }
-  SpotifyAuth.authorize();
-});
+}, {passive:true});
 
-ui.play.addEventListener('click', async () => {
+/* ---------- Play button behavior: hide on press; re-show ONLY on playback error ---------- */
+function showPlay(){ ui.playBtn.classList.remove('hidden'); ui.playBtn.disabled = false; }
+function hidePlay(){ ui.playBtn.classList.add('hidden'); ui.playBtn.disabled = true; }
+
+ui.playBtn.addEventListener('click', () => {
   hidePlay(); // hide immediately and keep hidden unless we hit an error
-  // Start Spotify ambient + message chain
-  resetMsgDeck();
-  startSpotifyAmbient();
-  // start shuffling message playback
-  nextMessage();
-});
 
-/* Handle redirect from Spotify if present, then decide which button to show */
-(async function init(){
-  await SpotifyAuth.handleRedirect();
-  const tokenOk = !!(await SpotifyAuth.getToken());
-  if (tokenOk) { hideConnect(); showPlay(); }
-  else { showConnect(); }
-})();
+  resetMsgDeck();
+  resetAmbDeck();
+
+  // Prime both players first to satisfy mobile autoplay policies
+  Promise.allSettled([prime(ui.amb), prime(ui.msg)]).finally(() => {
+    // Start the ambient bucket and message chain
+    playNextAmbient();
+    nextMessage();
+  });
+
+  try{ ui.amb.load(); ui.msg.load(); }catch{}
+});
 </script>
 </body>
 </html>
