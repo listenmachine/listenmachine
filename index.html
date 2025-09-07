@@ -1,56 +1,217 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>ListenMachine</title>
-<style>
-  body{margin:0;font-family:system-ui,Arial,sans-serif;background:#f7f7f7;color:#111}
-  .wrap{min-height:100vh;display:grid;place-items:center;padding:24px}
-  .card{max-width:740px;width:100%;background:#fff;border-radius:16px;box-shadow:0 20px 50px rgba(0,0,0,.08);padding:24px}
-  h1{margin:0 0 8px}
-  .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-  button{border:0;padding:12px 16px;border-radius:12px;background:#111;color:#fff;font-weight:600;cursor:pointer}
-  .pill{background:#f0f0f0;border-radius:999px;padding:6px 10px;font-size:13px}
-  .grid{display:grid;gap:10px;grid-template-columns:1fr 1fr;margin-top:10px}
-  label{font-size:12px;color:#444;margin-bottom:4px;display:block}
-  input[type="range"]{width:100%}
-  #status{font-size:12px;color:#666;margin-top:8px}
-  audio{display:none} /* keep players in DOM but hidden */
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ListenMachine</title>
+  <style>
+    :root { --fg:#111; --bg:#f7f7f7; --card:#ffffff; --muted:#666; }
+    html, body { height: 100%; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif; color:var(--fg); background:var(--bg); }
+    .wrap { min-height: 100%; display:flex; align-items:center; justify-content:center; padding: 24px; }
+    .card { background:var(--card); width: 100%; max-width: 760px; border-radius: 16px; box-shadow: 0 20px 50px rgba(0,0,0,.08); padding: 24px; }
+    h1 { margin: 0 0 8px; font-size: clamp(22px, 3.5vw, 28px); }
+    p { color: var(--muted); margin: 6px 0 16px; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+    button { appearance:none; border:0; padding:14px 18px; border-radius: 12px; background:#111; color:#fff; font-weight:600; cursor:pointer; }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    .meta { display:grid; gap:8px; grid-template-columns: 1fr; margin-top:14px; }
+    .pill { display:inline-flex; gap:8px; align-items:center; font-size: 13px; padding: 6px 10px; background:#f0f0f0; border-radius: 999px; color:#333; }
+    .grid { display:grid; gap:10px; grid-template-columns: 1fr 1fr; }
+    label { font-size: 12px; color:#444; display:block; margin-bottom:4px; }
+    input[type="range"] { width:100%; }
+    .progress { height: 8px; background:#eee; border-radius: 999px; overflow:hidden; }
+    .bar { height:100%; width:0%; background:#111; transition: width .2s ease; }
+    footer { margin-top:18px; font-size:12px; color:#777; }
+  </style>
 </head>
 <body>
-<div class="wrap">
-  <main class="card">
-    <h1>ListenMachine</h1>
-    <p>Press <b>Play</b> once. The ambient track plays straight through once; messages start/stop over it (no fades).</p>
+  <div class="wrap">
+    <main class="card">
+      <h1>ListenMachine</h1>
+      <p>Press <strong>Play</strong> once to allow audio. The ambient track plays in full; messages start/stop over it until the ambient ends.</p>
 
-    <div class="row"><button id="start">Play</button><span id="status"></span></div>
+      <div class="row">
+        <button id="start">Play</button>
+      </div>
 
-    <div class="row" style="margin-top:10px;gap:8px">
-      <span class="pill">Ambient: <span id="ambName">—</span></span>
-      <span class="pill">Message: <span id="msgName">—</span></span>
-    </div>
+      <div class="meta">
+        <div class="progress" aria-hidden="true"><div class="bar" id="bar"></div></div>
+        <div class="row">
+          <span class="pill">Message: <span id="msgName">—</span></span>
+          <span class="pill">Ambient: <span id="ambName">—</span></span>
+          <span class="pill">Seed: <span id="seed">—</span></span>
+          <span class="pill">Ambient length: <span id="len">—</span></span>
+        </div>
+        <div class="grid">
+          <div>
+            <label for="msgVol">Message volume</label>
+            <input type="range" id="msgVol" min="0" max="1" step="0.01" value="0.9" />
+          </div>
+          <div>
+            <label for="ambVol">Ambient volume</label>
+            <input type="range" id="ambVol" min="0" max="1" step="0.01" value="0.35" />
+          </div>
+        </div>
+      </div>
 
-    <div class="grid">
-      <div><label for="msgVol">Message volume</label><input id="msgVol" type="range" min="0" max="1" step="0.01" value="0.9"></div>
-      <div><label for="ambVol">Ambient volume</label><input id="ambVol" type="range" min="0" max="1" step="0.01" value="0.35"></div>
-    </div>
+      <footer>To add more ambients later, just list them below; one is picked per refresh. No fades on messages by design.</footer>
+    </main>
+  </div>
 
-    <!-- Keep elements in the DOM to appease iOS autoplay quirks -->
-    <audio id="amb" preload="auto"></audio>
-    <audio id="msg" preload="auto"></audio>
-  </main>
-</div>
+  <script>
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 1) FILE LISTS (same-origin relative URLs)
+  // ─────────────────────────────────────────────────────────────────────────────
+  const FILES = {
+    messages: [
+      "audio/messages/1.mp3","audio/messages/2.mp3","audio/messages/3.mp3","audio/messages/4.mp3",
+      "audio/messages/5.mp3","audio/messages/6.mp3","audio/messages/7.mp3","audio/messages/8.mp3",
+      "audio/messages/9.mp3","audio/messages/10.mp3","audio/messages/11.mp3","audio/messages/12.mp3",
+      "audio/messages/13.mp3","audio/messages/14.mp3","audio/messages/15.mp3","audio/messages/16.mp3",
+      "audio/messages/17.mp3","audio/messages/18.mp3","audio/messages/19.mp3","audio/messages/20.mp3",
+      "audio/messages/21.mp3","audio/messages/22.mp3","audio/messages/23.mp3","audio/messages/24.mp3",
+      "audio/messages/25.mp3","audio/messages/26.mp3","audio/messages/27.mp3","audio/messages/28.mp3",
+      "audio/messages/29.mp3","audio/messages/30.mp3","audio/messages/31.mp3","audio/messages/32.mp3",
+      "audio/messages/33.mp3","audio/messages/34.mp3","audio/messages/35.mp3","audio/messages/36.mp3",
+      "audio/messages/37.mp3","audio/messages/38.mp3","audio/messages/39.mp3","audio/messages/40.mp3",
+      "audio/messages/41.mp3","audio/messages/42.mp3","audio/messages/43.mp3","audio/messages/44.mp3",
+      "audio/messages/45.mp3","audio/messages/46.mp3","audio/messages/47.mp3","audio/messages/48.mp3",
+      "audio/messages/49.mp3","audio/messages/50.mp3","audio/messages/51.mp3","audio/messages/52.mp3",
+      "audio/messages/53.mp3","audio/messages/54.mp3","audio/messages/55.mp3","audio/messages/56.mp3",
+      "audio/messages/57.mp3","audio/messages/58.mp3","audio/messages/59.mp3","audio/messages/60.mp3",
+      "audio/messages/61.mp3","audio/messages/62.mp3","audio/messages/63.mp3","audio/messages/64.mp3",
+      "audio/messages/65.mp3","audio/messages/66.mp3","audio/messages/67.mp3","audio/messages/68.mp3",
+      "audio/messages/69.mp3","audio/messages/70.mp3","audio/messages/71.mp3","audio/messages/72.mp3",
+      "audio/messages/73.mp3","audio/messages/74.mp3","audio/messages/75.mp3","audio/messages/76.mp3",
+      "audio/messages/77.mp3","audio/messages/78.mp3"
+    ],
+    ambient: [
+      "audio/ambient/Aphex Twin - Stone In Focus 4.mp3"  // add more later; one is chosen per refresh
+    ]
+  };
 
-<script>
-/* ---- Your files ---- */
-const FILES = {
-  messages: [
-    "audio/messages/1.mp3","audio/messages/2.mp3","audio/messages/3.mp3","audio/messages/4.mp3",
-    "audio/messages/5.mp3","audio/messages/6.mp3","audio/messages/7.mp3","audio/messages/8.mp3",
-    "audio/messages/9.mp3","audio/messages/10.mp3","audio/messages/11.mp3","audio/messages/12.mp3",
-    "audio/messages/13.mp3","audio/messages/14.mp3","audio/messages/15.mp3","audio/messages/16.mp3",
-    "audio/messages/17.mp3","audio/messages/18.mp3","audio/messages/19.mp3","audio/messages/20.mp3",
-    "audio/messages/21.mp3","audio/messages/22.mp3","audio/messages/23.mp3","audio/messages/24.mp3",
-    "audio/messages/25.mp3","audio/messages/26.mp3","audio/messages/27.mp3",
+  // keep null when using local files
+  const MANIFEST_URL = null;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 2) helpers
+  // ─────────────────────────────────────────────────────────────────────────────
+  function xmur3(str){ let h=1779033703^str.length; for(let i=0;i<str.length;i++){ h=Math.imul(h^str.charCodeAt(i),3432918353); h=h<<13|h>>>19; } return function(){ h=Math.imul(h^h>>>16,2246822507); h=Math.imul(h^h>>>13,3266489909); return (h^h>>>16)>>>0; } }
+  function mulberry32(a){ return function(){ let t=a+=0x6D2B79F5; t=Math.imul(t^t>>>15,t|1); t^=t+Math.imul(t^t>>>7,t|61); return ((t^t>>>14)>>>0)/4294967296; } }
+  function pick(rng, arr){ return arr[Math.floor(rng()*arr.length)]; }
+  const fmt = s => { const m=Math.floor(s/60); const ss=Math.round(s%60).toString().padStart(2,'0'); return `${m}:${ss}`; };
+  const shortName = url => { try { const u = new URL(url, location.href); return decodeURIComponent(u.pathname.split('/').pop()); } catch { return url.split('/').pop() || url; } };
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 3) players (pure <audio>, no fades; ambient once; messages roll forever)
+  // ─────────────────────────────────────────────────────────────────────────────
+  const ui = {
+    start: document.getElementById('start'),
+    bar: document.getElementById('bar'),
+    msgName: document.getElementById('msgName'),
+    ambName: document.getElementById('ambName'),
+    len: document.getElementById('len'),
+    seed: document.getElementById('seed'),
+    msgVol: document.getElementById('msgVol'),
+    ambVol: document.getElementById('ambVol'),
+  };
+
+  const amb = new Audio(); amb.preload = 'auto'; amb.loop = false;           // full song, no loop
+  const msg = new Audio(); msg.preload = 'auto';
+
+  ui.msgVol.addEventListener('input', () => { msg.volume = parseFloat(ui.msgVol.value); });
+  ui.ambVol.addEventListener('input', () => { amb.volume = parseFloat(ui.ambVol.value); });
+
+  let seq = 0, playing = false, progRAF = null, baseSeed = '';
+
+  function setBar(p){ ui.bar.style.width = `${Math.max(0, Math.min(1,p))*100}%`; }
+
+  function progressLoop(){
+    if (!playing) return;
+    if (amb.duration && isFinite(amb.duration)) {
+      setBar(amb.currentTime / amb.duration);
+      ui.len.textContent = fmt(amb.duration);
+    }
+    progRAF = requestAnimationFrame(progressLoop);
+  }
+
+  function nextMessage(){
+    if (amb.ended) return; // ambient finished; session ends
+    if (!FILES.messages.length) return;
+
+    const rng = mulberry32(xmur3(`${baseSeed}-m-${seq++}`)());
+    const choice = pick(rng, FILES.messages);
+
+    ui.msgName.textContent = shortName(choice);
+    msg.src = choice;
+    msg.currentTime = 0;
+    msg.volume = parseFloat(ui.msgVol.value);
+
+    // on error, skip to another
+    msg.onerror = () => { nextMessage(); };
+    msg.onended = () => { nextMessage(); }; // hard cut; no fade
+    msg.play().catch(() => { /* ignore transient play promises */ });
+  }
+
+  function startSession(){
+    playing = true;
+    ui.start.disabled = true;
+
+    // seed (optional ?seed= in URL)
+    const urlSeed = new URLSearchParams(location.search).get('seed');
+    baseSeed = urlSeed || `${Date.now()}-${Math.random()}`;
+    ui.seed.textContent = baseSeed;
+
+    // pick one ambient per refresh
+    const rngAmb = mulberry32(xmur3(`${baseSeed}-amb`)());
+    const ambPick = pick(rngAmb, FILES.ambient);
+    ui.ambName.textContent = shortName(ambPick);
+
+    amb.src = ambPick;
+    amb.currentTime = 0;
+    amb.volume = parseFloat(ui.ambVol.value);
+
+    amb.onerror = () => { playing = false; ui.start.disabled = false; alert('Ambient failed to load. Check the filename/path.'); };
+    amb.onloadedmetadata = () => {
+      if (!playing) return;
+      // start ambient and then messages
+      amb.play().then(() => {
+        nextMessage();
+        if (!progRAF) progRAF = requestAnimationFrame(progressLoop);
+      }).catch(() => {
+        playing = false; ui.start.disabled = false;
+      });
+    };
+
+    amb.onended = () => {
+      // ambient finished: stop messages; allow replay
+      try { msg.pause(); } catch {}
+      playing = false;
+      cancelAnimationFrame(progRAF); progRAF = null;
+      setBar(1);
+      ui.start.disabled = false;
+      ui.start.textContent = 'Play again';
+    };
+
+    // if using a local manifest later
+    // (kept for future: MANIFEST_URL can overwrite FILES)
+  }
+
+  async function boot(){
+    if (MANIFEST_URL){
+      try {
+        const r = await fetch(MANIFEST_URL); const j = await r.json();
+        if (Array.isArray(j.messages)) FILES.messages = j.messages;
+        if (Array.isArray(j.ambient)) FILES.ambient = j.ambient;
+      } catch {}
+    }
+  }
+
+  ui.start.addEventListener('click', async () => {
+    await boot();
+    startSession();
+  });
+  </script>
+</body>
+</html>
