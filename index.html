@@ -1,68 +1,53 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ListenMachine</title>
-  <style>
-    :root { --fg:#111; --bg:#f7f7f7; --card:#ffffff; --muted:#666; }
-    html, body { height: 100%; }
-    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif; color:var(--fg); background:var(--bg); }
-    .wrap { min-height: 100%; display:flex; align-items:center; justify-content:center; padding: 24px; }
-    .card { background:var(--card); width: 100%; max-width: 760px; border-radius: 16px; box-shadow: 0 20px 50px rgba(0,0,0,.08); padding: 24px; }
-    h1 { margin: 0 0 8px; font-size: clamp(22px, 3.5vw, 28px); }
-    p { color: var(--muted); margin: 6px 0 16px; }
-    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
-    button { appearance:none; border:0; padding:14px 18px; border-radius: 12px; background:#111; color:#fff; font-weight:600; cursor:pointer; }
-    button:disabled { opacity:.5; cursor:not-allowed; }
-    .meta { display:grid; gap:8px; grid-template-columns: 1fr; margin-top:14px; }
-    .pill { display:inline-flex; gap:8px; align-items:center; font-size: 13px; padding: 6px 10px; background:#f0f0f0; border-radius: 999px; color:#333; }
-    .grid { display:grid; gap:10px; grid-template-columns: 1fr 1fr; }
-    label { font-size: 12px; color:#444; display:block; margin-bottom:4px; }
-    input[type="range"] { width:100%; }
-    .progress { height: 8px; background:#eee; border-radius: 999px; overflow:hidden; }
-    .bar { height:100%; width:0%; background:#111; transition: width .2s ease; }
-    footer { margin-top:18px; font-size:12px; color:#777; }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>ListenMachine</title>
+<style>
+  body{margin:0;font-family:system-ui,Arial,sans-serif;background:#f7f7f7;color:#111}
+  .wrap{min-height:100vh;display:grid;place-items:center;padding:24px}
+  .card{max-width:740px;width:100%;background:#fff;border-radius:16px;box-shadow:0 20px 50px rgba(0,0,0,.08);padding:24px}
+  h1{margin:0 0 8px}
+  .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  button{border:0;padding:12px 16px;border-radius:12px;background:#111;color:#fff;font-weight:600;cursor:pointer}
+  .pill{background:#f0f0f0;border-radius:999px;padding:6px 10px;font-size:13px}
+  .grid{display:grid;gap:10px;grid-template-columns:1fr 1fr}
+  label{font-size:12px;color:#444;margin-bottom:4px;display:block}
+  input[type="range"]{width:100%}
+</style>
 </head>
 <body>
-  <div class="wrap">
-    <main class="card">
-      <h1>ListenMachine</h1>
-      <p>Press <strong>Play</strong> once to allow audio. The ambient track plays in full; messages start/stop over it until the ambient ends.</p>
+<div class="wrap">
+  <main class="card">
+    <h1>ListenMachine</h1>
+    <p>Press <b>Play</b> once. The ambient track plays straight through once; messages start/stop over it (no fades).</p>
+    <div class="row"><button id="start">Play</button></div>
+    <div class="row" style="margin-top:10px;gap:8px">
+      <span class="pill">Ambient: <span id="ambName">—</span></span>
+      <span class="pill">Message: <span id="msgName">—</span></span>
+    </div>
+    <div class="grid" style="margin-top:12px">
+      <div><label for="msgVol">Message volume</label><input id="msgVol" type="range" min="0" max="1" step="0.01" value="0.9"></div>
+      <div><label for="ambVol">Ambient volume</label><input id="ambVol" type="range" min="0" max="1" step="0.01" value="0.35"></div>
+    </div>
+  </main>
+</div>
 
-      <div class="row">
-        <button id="start">Play</button>
-      </div>
-
-      <div class="meta">
-        <div class="progress" aria-hidden="true"><div class="bar" id="bar"></div></div>
-        <div class="row">
-          <span class="pill">Message: <span id="msgName">—</span></span>
-          <span class="pill">Ambient: <span id="ambName">—</span></span>
-          <span class="pill">Seed: <span id="seed">—</span></span>
-          <span class="pill">Ambient length: <span id="len">—</span></span>
-        </div>
-        <div class="grid">
-          <div>
-            <label for="msgVol">Message volume</label>
-            <input type="range" id="msgVol" min="0" max="1" step="0.01" value="0.9" />
-          </div>
-          <div>
-            <label for="ambVol">Ambient volume</label>
-            <input type="range" id="ambVol" min="0" max="1" step="0.01" value="0.35" />
-          </div>
-        </div>
-      </div>
-
-      <footer>To add more ambients later, just list them below; one is picked per refresh. No fades on messages by design.</footer>
-    </main>
-  </div>
-
-  <script>
-  // ─────────────────────────────────────────────────────────────────────────────
-  // 1) FILE LISTS (same-origin relative URLs)
-  // ─────────────────────────────────────────────────────────────────────────────
-  const FILES = {
-    messages: [
-      "audio/messages/1.mp3","audio/messages/2.mp3","audio/me
+<script>
+/* ---- Your files ---- */
+const FILES = {
+  messages: [
+    "audio/messages/1.mp3","audio/messages/2.mp3","audio/messages/3.mp3","audio/messages/4.mp3",
+    "audio/messages/5.mp3","audio/messages/6.mp3","audio/messages/7.mp3","audio/messages/8.mp3",
+    "audio/messages/9.mp3","audio/messages/10.mp3","audio/messages/11.mp3","audio/messages/12.mp3",
+    "audio/messages/13.mp3","audio/messages/14.mp3","audio/messages/15.mp3","audio/messages/16.mp3",
+    "audio/messages/17.mp3","audio/messages/18.mp3","audio/messages/19.mp3","audio/messages/20.mp3",
+    "audio/messages/21.mp3","audio/messages/22.mp3","audio/messages/23.mp3","audio/messages/24.mp3",
+    "audio/messages/25.mp3","audio/messages/26.mp3","audio/messages/27.mp3","audio/messages/28.mp3",
+    "audio/messages/29.mp3","audio/messages/30.mp3","audio/messages/31.mp3","audio/messages/32.mp3",
+    "audio/messages/33.mp3","audio/messages/34.mp3","audio/messages/35.mp3","audio/messages/36.mp3",
+    "audio/messages/37.mp3","audio/messages/38.mp3","audio/messages/39.mp3","audio/messages/40.mp3",
+    "audio/messages/41.mp3","audio/messages/42.mp3","audio/messages/43.mp3","audio/messages/44.mp3",
+    "audio/messages/45.mp3","audio/messages/46.mp3","audio/messages/47.mp3","audio/messages/48.mp3",
+    "audio/messages/49.mp3","audio
