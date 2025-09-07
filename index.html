@@ -20,52 +20,70 @@
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
 
+  /* Background videos for crossfade */
   .bgvideo{
-    position: fixed; inset: 0;
+    position: fixed;
+    inset: 0;
     width: 100%; height: 100%;
     object-fit: cover;
-    z-index: 0; pointer-events: none;
+    z-index: 0;
+    pointer-events: none;
     background:#000;
     filter: saturate(0.9) contrast(1.05) blur(0.3px);
     opacity: 0;
-    transition: opacity 10000ms linear;
+    transition: opacity 10000ms linear; /* 10s slow fade */
   }
   .bgvideo.show{ opacity: 1; }
 
+  /* Title */
   .title-wrap{
     position: fixed;
     top: clamp(12px, 8vh, 96px);
-    left: 50%; transform: translateX(-50%);
+    left: 50%;
+    transform: translateX(-50%);
     width: min(92vw, 1200px);
-    z-index: 2; text-align: center; pointer-events: none;
+    z-index: 2;
+    text-align: center;
+    pointer-events: none;
     padding-inline: 2vw;
   }
   #title{
-    margin: 0; text-transform: uppercase; white-space: nowrap;
-    letter-spacing: 0.18em; font-weight: 700; line-height: 1.06;
-    color: var(--ui-color); user-select: none;
-    font-size: 8vw; will-change: font-size;
+    margin: 0;
+    text-transform: uppercase;
+    white-space: nowrap;
+    letter-spacing: 0.18em;
+    font-weight: 700;
+    line-height: 1.06;
+    color: var(--ui-color);
+    user-select: none;
+    font-size: 8vw; /* JS shrinks to fit exactly */
+    will-change: font-size;
   }
 
+  /* Center Play button */
   .playbtn{
-    position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%);
-    z-index: 3; display: inline-flex; align-items: center; justify-content: center;
+    position: fixed;
+    left: 50%; top: 50%;
+    transform: translate(-50%,-50%);
+    z-index: 3;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     padding: 14px 32px;
     border: clamp(3px, 0.6vw, 6px) solid var(--ui-color);
-    border-radius: 0; background: transparent; color: var(--ui-color);
-    text-transform: uppercase; font-weight: 800; letter-spacing: 0.22em;
-    font-size: clamp(12px, 2.6vw, 18px); line-height: 1; cursor: pointer;
-    -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+    border-radius: 0;
+    background: transparent;
+    color: var(--ui-color);
+    text-transform: uppercase;
+    font-weight: 800;
+    letter-spacing: 0.22em;
+    font-size: clamp(12px, 2.6vw, 18px);
+    line-height: 1;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
   }
   .hidden{ display:none !important; }
-
-  /* Tiny toast to confirm audio start */
-  .toast{
-    position: fixed; right: 12px; bottom: 12px; z-index: 4;
-    background: rgba(255,255,255,0.08); color:#fff; padding:10px 14px;
-    border: 1px solid rgba(255,255,255,0.25);
-    font-size: 12px; letter-spacing: .06em; text-transform: uppercase;
-  }
 
   @media (prefers-reduced-motion: reduce){
     .bgvideo{ display:none; }
@@ -82,22 +100,19 @@
 <!-- Title -->
 <div class="title-wrap"><h1 id="title">LISTENMACHINE</h1></div>
 
-<!-- Center Play button -->
+<!-- Play button -->
 <button id="play" class="playbtn" type="button" aria-label="Play">PLAY</button>
 
-<!-- Tiny toast (hidden until used) -->
-<div id="toast" class="toast hidden"></div>
-
-<!-- Hidden audio elements -->
+<!-- Hidden audio -->
 <audio id="amb" preload="auto" playsinline></audio>
 <audio id="msg" preload="auto" playsinline></audio>
 
 <script>
-/* ===================== SETTINGS / VERSION ===================== */
-const VERSION = 32; // bump to bust cache when you push
+/* ===================== SETTINGS ===================== */
+const VERSION = 33; // bump to bust cache if media changes
 const AMBIENT_FILENAME = "Aphex Twin - Stone In Focus 4.mp3";
 
-/* -------- Auto-fit title to ONE line (never clipped) -------- */
+/* -------- Fit title to one line -------- */
 (function(){
   const title = document.getElementById('title');
   function fit(){
@@ -117,7 +132,7 @@ const AMBIENT_FILENAME = "Aphex Twin - Stone In Focus 4.mp3";
 </script>
 
 <script>
-/* ===================== BACKGROUND CROSSFADE (10s switch, 10s fade) ===================== */
+/* ===================== BACKGROUND CROSSFADE ===================== */
 const BG = {
   first:  "media/Clouds2.mp4",
   second: "media/Road1.mp4",
@@ -131,7 +146,9 @@ const BG = {
   A.style.transitionDuration = BG.fadeMs + 'ms';
   B.style.transitionDuration = BG.fadeMs + 'ms';
 
+  // Set sources with cache-buster
   A.src = `${BG.first}?v=${VERSION}`;
+
   const startA = () => { try { A.play(); } catch(e){} };
   if (A.readyState >= 2) startA(); else A.addEventListener('canplay', startA, {once:true});
 
@@ -147,21 +164,26 @@ const BG = {
         A.classList.remove('show'); // fade A out
         setTimeout(() => {
           try { A.pause(); } catch {}
-          A.removeAttribute('src'); try { A.load(); } catch {}
+          A.removeAttribute('src');
+          try { A.load(); } catch {}
         }, BG.fadeMs + 60);
       };
-      if (B.readyState >= 2) go(); else { B.addEventListener('canplay', go, {once:true}); try { B.load(); } catch {} }
+      if (B.readyState >= 2) go();
+      else { B.addEventListener('canplay', go, {once:true}); try { B.load(); } catch {} }
     }, BG.switchAfterMs);
   }
+
   A.addEventListener('playing', startTimer, {once:true});
-  setTimeout(startTimer, 1500);
+  setTimeout(startTimer, 1500); // fallback
 })();
 </script>
 
 <script>
-/* ===================== AUDIO PLAYER (LOCAL FILES) ===================== */
+/* ===================== AUDIO PLAYER ===================== */
 const FILES = {
-  ambient: [ `audio/ambient/${AMBIENT_FILENAME}?v=${VERSION}` ],
+  ambient: [
+    `audio/ambient/${AMBIENT_FILENAME}?v=${VERSION}`
+  ],
   messages: [
     "audio/messages/1.mp3","audio/messages/2.mp3","audio/messages/3.mp3","audio/messages/4.mp3",
     "audio/messages/5.mp3","audio/messages/6.mp3","audio/messages/7.mp3","audio/messages/8.mp3",
@@ -187,7 +209,7 @@ const FILES = {
 };
 
 const $ = s => document.querySelector(s);
-const ui = { playBtn: $("#play"), amb: $("#amb"), msg: $("#msg"), toast: $("#toast") };
+const ui = { playBtn: $("#play"), amb: $("#amb"), msg: $("#msg") };
 
 ui.amb.loop = false;
 ui.amb.volume = 1.0;
@@ -198,13 +220,11 @@ let msgDeck = [];
 let ambDeck = [];
 let messagesStarted = false;
 let ambientStarted = false;
-let somethingStarted = false;
 
 function resetMsgDeck(){ msgDeck = shuffle(FILES.messages); }
 function resetAmbDeck(){ ambDeck = shuffle(FILES.ambient || []); }
-function showToast(txt){ ui.toast.textContent = txt; ui.toast.classList.remove('hidden'); setTimeout(()=>ui.toast.classList.add('hidden'), 2000); }
 
-/* -------- Messages (load → play on canplay) -------- */
+/* -------- Messages with watchdogs -------- */
 function clearMsgHandlers(){
   const m = ui.msg;
   m.onended = m.onerror = m.onstalled = m.onsuspend = m.onwaiting =
@@ -226,8 +246,8 @@ function nextMessage(){
     if (stallTimer) clearTimeout(stallTimer);
     stallTimer = setTimeout(skip, 8000);
   };
-  m.oncanplay = () => { m.play().catch(()=>{}); };
-  m.onplaying = () => { started = true; somethingStarted = true; if(stallTimer){ clearTimeout(stallTimer); stallTimer=null; } if(startTimer){ clearTimeout(startTimer); startTimer=null; } };
+  m.onloadeddata = m.oncanplay = () => { m.play().catch(()=>{}); };
+  m.onplaying = () => { started = true; if(stallTimer){ clearTimeout(stallTimer); stallTimer=null; } if(startTimer){ clearTimeout(startTimer); startTimer=null; } };
   m.ontimeupdate = () => {
     if (m.currentTime > lastT + 0.25){ lastT = m.currentTime; if (stallTimer){ clearTimeout(stallTimer); stallTimer=null; } }
   };
@@ -235,52 +255,55 @@ function nextMessage(){
   m.src = encodeURI(src);
   try { m.load(); } catch {}
   startTimer = setTimeout(() => { if(!started) skip(); }, 12000);
+  m.play().catch(()=>{});
 }
 
-/* -------- Ambient (load → play on canplay) -------- */
+/* -------- Ambient playback -------- */
+function clearAmbHandlers(){ ui.amb.onended = ui.amb.onerror = ui.amb.onplaying = null; }
+
 function playNextAmbient(){
-  ui.amb.oncanplay = ui.amb.onplaying = ui.amb.onerror = ui.amb.onended = null;
+  clearAmbHandlers();
 
   if (!ambDeck.length){
-    console.warn("No ambient in deck; messages will run without music.");
-    if (!messagesStarted){ messagesStarted = true; setTimeout(nextMessage, 800); }
+    // No ambient -> still start messages
+    if (!messagesStarted){
+      messagesStarted = true;
+      setTimeout(nextMessage, 1000);
+    }
     return;
   }
 
   const src = ambDeck.shift();
   const a = ui.amb;
 
-  a.oncanplay = () => {
-    a.play().then(()=>{
-      // Stone In Focus fades in—confirm visually
-      showToast("Now playing: ambient");
-    }).catch(e => console.warn("Ambient play() rejected:", e && e.message));
-  };
+  a.onended = () => { console.log("Ambient ended:", a.src); /* no loop */ };
+  a.onerror = () => { console.warn("Ambient failed to load/play:", a.src); /* messages fallback already scheduled */ };
   a.onplaying = () => {
-    somethingStarted = true;
     if (!ambientStarted){
       ambientStarted = true;
       if (!messagesStarted){
         messagesStarted = true;
-        setTimeout(nextMessage, 3000); // wait ~3s after ambient actually starts
+        setTimeout(nextMessage, 3000);  // start messages ~3s after ambient begins
       }
     }
   };
-  a.onerror  = () => { console.warn("Ambient failed to load/play:", a.src); };
 
   a.src = encodeURI(src);
+  a.currentTime = 0;
+
+  a.play().catch(() => { /* keep button hidden even if ambient fails */ });
   try { a.load(); } catch {}
 }
 
-/* -------- Priming (safe across browsers) -------- */
+/* -------- Prime on click (mobile autoplay fix) -------- */
 function prime(el){
   el.muted = true;
   return el.play().then(() => {
     el.pause(); el.currentTime = 0; el.muted = false;
-  }).catch(()=>{ el.muted = false; /* fine if it fails; click is enough */ });
+  }).catch(()=>{ el.muted = false; });
 }
 
-/* -------- Visibility resume nudges -------- */
+/* -------- Resume nudges -------- */
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden){
     if (ui.amb.paused && ambientStarted) { ui.amb.play().catch(()=>{}); }
@@ -288,13 +311,7 @@ document.addEventListener('visibilitychange', () => {
   }
 }, {passive:true});
 
-/* -------- Play button logic -------- */
-function showPlay(label = "PLAY"){
-  ui.playBtn.textContent = label;
-  ui.playBtn.classList.remove('hidden');
-  ui.playBtn.style.display = '';
-  ui.playBtn.disabled = false;
-}
+/* -------- Play button -------- */
 function hidePlay(){
   ui.playBtn.classList.add('hidden');
   ui.playBtn.style.display = 'none';
@@ -302,33 +319,26 @@ function hidePlay(){
 }
 
 ui.playBtn.addEventListener('click', () => {
-  hidePlay();
+  hidePlay();  // disappear immediately
 
   resetMsgDeck();
   resetAmbDeck();
   messagesStarted = false;
   ambientStarted = false;
-  somethingStarted = false;
 
-  // Guaranteed message fallback so "nothing happens" can’t occur
-  const msgFallback = setTimeout(() => {
-    if (!messagesStarted){
-      messagesStarted = true;
-      nextMessage();
-    }
-  }, 2500);
-
-  // Panic timer: if neither ambient nor message started, re-show PLAY
-  const panic = setTimeout(() => {
-    if (!somethingStarted){
-      showPlay("TRY AGAIN");
-    }
-  }, 9000);
-
-  // Prime + start ambient cleanly (load → canplay → play)
-  Promise.all([prime(ui.amb), prime(ui.msg)].map(p => p.catch(()=>{}))).then(()=>{
+  // Start ambient; if it doesn't start, messages still begin after 6s.
+  Promise.all([prime(ui.amb), prime(ui.msg)].map(p => p.catch(()=>{}))).finally(() => {
     playNextAmbient();
+
+    setTimeout(() => {
+      if (!messagesStarted){
+        messagesStarted = true;
+        nextMessage();
+      }
+    }, 6000);
   });
+
+  try{ ui.amb.load(); ui.msg.load(); }catch{}
 });
 </script>
 </body>
