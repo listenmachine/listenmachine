@@ -7,7 +7,7 @@
 <meta name="color-scheme" content="dark light" />
 <style>
   :root{
-    /* Single knob for both title and button colour/opacity */
+    /* One knob for title + button colour/opacity */
     --ui-alpha: 0.26;
     --ui-color: rgba(255,255,255,var(--ui-alpha));
   }
@@ -15,9 +15,9 @@
   html, body { height: 100%; }
   body {
     margin: 0;
-    background: #000; /* page background (video sits above) */
+    background: #000;
     color: #fff;
-    overflow: hidden; /* pure splash */
+    overflow: hidden; /* splash */
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
 
@@ -29,11 +29,11 @@
     object-fit: cover;
     z-index: 0;
     pointer-events: none;
-    filter: saturate(0.9) contrast(1.05) blur(0.3px); /* subtle VHS-ish softness */
+    filter: saturate(0.9) contrast(1.05) blur(0.3px); /* subtle VHS softness */
     background:#000;
   }
 
-  /* Title near the top, always single line and fully visible */
+  /* Title near the top, single line, never clipped */
   .title-wrap{
     position: fixed;
     top: clamp(12px, 8vh, 96px);
@@ -48,19 +48,19 @@
   #title{
     margin: 0;
     text-transform: uppercase;
-    white-space: nowrap;          /* one line only */
-    letter-spacing: 0.18em;       /* wide but reasonable on phones */
+    white-space: nowrap;          /* force one line */
+    letter-spacing: 0.18em;
     font-weight: 700;
     line-height: 1.06;
     color: var(--ui-color);
     user-select: none;
 
-    /* Start smaller; JS will shrink further to fit if needed */
+    /* Start size; JS shrinks until it fits container width */
     font-size: 8vw;
     will-change: font-size;
   }
 
-  /* Center Play button: outline box + matching text colour/opacity */
+  /* Center Play button: rectangular outline + matching text */
   .playbtn{
     position: fixed;
     left: 50%; top: 50%;
@@ -71,11 +71,11 @@
     align-items: center;
     justify-content: center;
 
-    padding: 14px 28px;
-    border-radius: 6px;
+    padding: 14px 32px;
     border: clamp(3px, 0.6vw, 6px) solid var(--ui-color); /* thick stroke */
-    background: transparent;       /* no fill */
-    color: var(--ui-color);        /* text matches title */
+    border-radius: 0;               /* rectangle (not pill) */
+    background: transparent;        /* no fill */
+    color: var(--ui-color);         /* text matches title */
     text-transform: uppercase;
     font-weight: 800;
     letter-spacing: 0.22em;
@@ -86,8 +86,8 @@
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
   }
-  .playbtn:disabled{ opacity: 0.6; cursor: default; }
-  .playbtn:focus-visible{ outline: none; box-shadow: 0 0 0 2px color-mix(in oklab, white 30%, transparent); }
+  /* Keep visual identical even when disabled (no dimming) */
+  .playbtn:disabled{ opacity: 1; cursor: default; }
 
   /* Motion/accessibility */
   @media (prefers-reduced-motion: reduce){
@@ -98,17 +98,17 @@
 </head>
 <body>
 
-<!-- Background video (muted+playsinline so it autoplays on mobile) -->
+<!-- Background video -->
 <video id="bg-video" autoplay muted loop playsinline preload="metadata" aria-hidden="true">
-  <source src="media/Clouds.mp4?v=7" type="video/mp4">
+  <source src="media/Clouds.mp4?v=8" type="video/mp4">
 </video>
 
-<!-- Minimal title (auto-fitted via JS to one line) -->
+<!-- Title -->
 <div class="title-wrap">
   <h1 id="title">LISTENMACHINE</h1>
 </div>
 
-<!-- Center Play control: outline box + matching text -->
+<!-- Center Play button -->
 <button id="play" class="playbtn" type="button" aria-label="Play">PLAY</button>
 
 <!-- Hidden audio elements -->
@@ -116,18 +116,18 @@
 <audio id="msg" preload="auto" playsinline></audio>
 
 <script>
-/* -------- Auto-fit title to one line (never clipped) -------- */
+/* -------- Auto-fit title to ONE line (never clipped) -------- */
 (function(){
   const title = document.getElementById('title');
   function fit(){
     const container = title.parentElement;
     const maxWidth = container.clientWidth;
 
-    // Start size relative to viewport; capped to stay sane
+    // initial size relative to viewport; capped
     let size = Math.min(window.innerWidth * 0.08, window.innerHeight * 0.18, 110); // px
     title.style.fontSize = size + 'px';
 
-    // Shrink until the single-line title fits container width
+    // shrink until single-line title fits container width
     let safety = 80;
     while (title.scrollWidth > (maxWidth - 1.5) && safety-- > 0){
       size *= 0.965;
@@ -201,7 +201,7 @@ function prime(el){
 }
 
 ui.playBtn.addEventListener('click', () => {
-  ui.playBtn.disabled = true;
+  ui.playBtn.disabled = true; // prevent double-starts (visual unchanged)
 
   resetDeck();
   const ambPick = shuffle(FILES.ambient)[0];
