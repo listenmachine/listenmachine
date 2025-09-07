@@ -16,14 +16,14 @@
   label{font-size:12px;color:#444;margin-bottom:4px;display:block}
   input[type="range"]{width:100%}
   #status{font-size:12px;color:#666;margin-top:8px}
-  audio{display:none} /* keep players in DOM but hidden */
+  audio{display:none}
 </style>
 </head>
 <body>
 <div class="wrap">
   <main class="card">
     <h1>ListenMachine</h1>
-    <p>Press <b>Play</b> once. The ambient track plays straight through once; messages start/stop over it (no fades).</p>
+    <p>Press <b>Play</b> once. The ambient track plays straight through once; messages start/stop over it (no fades), and <b>don’t repeat</b> during the session.</p>
 
     <div class="row"><button id="start">Play</button><span id="status"></span></div>
 
@@ -33,11 +33,10 @@
     </div>
 
     <div class="grid">
-      <div><label for="msgVol">Message volume</label><input id="msgVol" type="range" min="0" max="1" step="0.01" value="0.9"></div>
-      <div><label for="ambVol">Ambient volume</label><input id="ambVol" type="range" min="0" max="1" step="0.01" value="0.35"></div>
+      <div><label for="msgVol">Message volume</label><input id="msgVol" type="range" min="0" max="1" step="0.01" value="0.5"></div>
+      <div><label for="ambVol">Ambient volume</label><input id="ambVol" type="range" min="0" max="1" step="0.01" value="1.0"></div>
     </div>
 
-    <!-- Keep elements in the DOM to appease iOS autoplay quirks -->
     <audio id="amb" preload="auto"></audio>
     <audio id="msg" preload="auto"></audio>
   </main>
@@ -85,45 +84,66 @@ const ui = {
   msg: $("msg"),
 };
 
-ui.amb.loop = false; // play once
-ui.amb.volume = parseFloat(ui.ambVol.value);
-ui.msg.volume = parseFloat(ui.msgVol.value);
+ui.amb.loop = false;                           // play once
+ui.amb.volume = parseFloat(ui.ambVol.value);   // default 1.0
+ui.msg.volume = parseFloat(ui.msgVol.value);   // default 0.5
 ui.ambVol.addEventListener('input', () => ui.amb.volume = parseFloat(ui.ambVol.value));
 ui.msgVol.addEventListener('input', () => ui.msg.volume = parseFloat(ui.msgVol.value));
 
-function pick(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
-function nameOf(path){ return decodeURIComponent(path.split('/').pop()); }
-function setStatus(t){ ui.status.textContent = t; }
+const nameOf = path => decodeURIComponent(path.split('/').pop());
+const setStatus = t => ui.status.textContent = t;
 
+/* Fisher–Yates shuffle */
+function shuffle(a){
+  const arr = a.slice();
+  for(let i=arr.length-1;i>0;i--){
+    const j = Math.floor(Math.random()*(i+1));
+    [arr[i],arr[j]] = [arr[j],arr[i]];
+  }
+  return arr;
+}
+
+/* Build a non-repeating deck for this session */
+let messageDeck = [];
+function resetMessageDeck(){
+  messageDeck = shuffle(FILES.messages);
+}
+
+/* Play next unique message (no repeats in this session) */
 function nextMessage(){
-  if (ui.amb.ended) return;               // stop when ambient finishes
-  const choice = pick(FILES.messages);
+  if (ui.amb.ended) return;            // session ends when ambient ends
+  if (!messageDeck.length){
+    setStatus("All messages played once.");
+    return;                            // no repeats; stay quiet until ambient ends
+  }
+  const choice = messageDeck.shift();  // unique pick
   ui.msgName.textContent = nameOf(choice);
-  ui.msg.src = encodeURI(choice);          // encode spaces nicely
+  ui.msg.src = encodeURI(choice);
   ui.msg.currentTime = 0;
-  ui.msg.onerror = () => {                 // skip any bad file
+  ui.msg.onerror = () => {             // skip any bad file, keep uniqueness
     setStatus("Message failed, skipping…");
-    setTimeout(nextMessage, 50);
+    nextMessage();
   };
-  ui.msg.onended = () => { setTimeout(nextMessage, 10); }; // hard cut to next (no fade)
-  ui.msg.play().catch(() => {
-    // If a browser blocks the 2nd element, poke it once more
-    setTimeout(() => ui.msg.play().catch(()=>{}), 50);
-  });
+  ui.msg.onended = () => {             // hard cut; no fade
+    // tiny delay helps some mobile browsers fire events in order
+    setTimeout(nextMessage, 10);
+  };
+  ui.msg.play().catch(()=>{});         // do not touch ambient here
 }
 
 ui.start.addEventListener('click', () => {
   ui.start.disabled = true;
-  setStatus("Starting ambient…");
+  setStatus("Starting…");
+
+  resetMessageDeck();                  // new non-repeating order each session
 
   // pick ONE ambient per session
-  const ambPick = pick(FILES.ambient);
+  const ambPick = shuffle(FILES.ambient)[0];
   ui.ambName.textContent = nameOf(ambPick);
   ui.amb.src = encodeURI(ambPick);
   ui.amb.currentTime = 0;
 
-  // Prime both players to satisfy strict autoplay policies
-  // (briefly play muted, then pause & unmute; keeps user-gesture credit)
+  // prime both players once (helps strict autoplay policies)
   const prime = el => el.play().then(() => { el.pause(); el.currentTime = 0; }).catch(()=>{});
   ui.amb.muted = true; ui.msg.muted = true;
   Promise.all([prime(ui.amb), prime(ui.msg)]).finally(() => { ui.amb.muted = false; ui.msg.muted = false; });
@@ -131,9 +151,8 @@ ui.start.addEventListener('click', () => {
   ui.amb.onloadedmetadata = () => {
     setStatus("Ambient playing…");
     ui.amb.play().then(() => {
-      // Start the message chain; NEVER touch ambient again
       nextMessage();
-    }).catch(err => {
+    }).catch(() => {
       setStatus("Ambient blocked. Tap Play again.");
       ui.start.disabled = false;
     });
@@ -151,7 +170,6 @@ ui.start.addEventListener('click', () => {
     ui.start.textContent = 'Play again';
   };
 
-  // kick load; some browsers need an explicit call
   try { ui.amb.load(); } catch {}
 });
 </script>
