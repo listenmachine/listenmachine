@@ -23,7 +23,7 @@
 <div class="wrap">
   <main class="card">
     <h1>ListenMachine</h1>
-    <p>Press <b>Play</b> once. The ambient track plays straight through once; messages start/stop over it (no fades), and <b>don’t repeat</b> during the session.</p>
+    <p>Ambient plays straight through once; messages start/stop over it, <b>no repeats</b> per session.</p>
 
     <div class="row"><button id="start">Play</button><span id="status"></span></div>
 
@@ -37,8 +37,8 @@
       <div><label for="ambVol">Ambient volume</label><input id="ambVol" type="range" min="0" max="1" step="0.01" value="1.0"></div>
     </div>
 
-    <audio id="amb" preload="auto"></audio>
-    <audio id="msg" preload="auto"></audio>
+    <audio id="amb" preload="auto" playsinline></audio>
+    <audio id="msg" preload="auto" playsinline></audio>
   </main>
 </div>
 
@@ -68,7 +68,7 @@ const FILES = {
     "audio/messages/77.mp3","audio/messages/78.mp3"
   ],
   ambient: [
-    "audio/ambient/Aphex Twin - Stone In Focus 4.mp3"  // add more later; one is chosen per refresh
+    "audio/ambient/Aphex Twin - Stone In Focus 4.mp3"  // add more later
   ]
 };
 
@@ -93,7 +93,7 @@ ui.msgVol.addEventListener('input', () => ui.msg.volume = parseFloat(ui.msgVol.v
 const nameOf = path => decodeURIComponent(path.split('/').pop());
 const setStatus = t => ui.status.textContent = t;
 
-/* Fisher–Yates shuffle */
+/* Fisher–Yates shuffle for the non-repeating deck */
 function shuffle(a){
   const arr = a.slice();
   for(let i=arr.length-1;i>0;i--){
@@ -103,74 +103,57 @@ function shuffle(a){
   return arr;
 }
 
-/* Build a non-repeating deck for this session */
-let messageDeck = [];
-function resetMessageDeck(){
-  messageDeck = shuffle(FILES.messages);
-}
+let deck = [];
+function resetDeck(){ deck = shuffle(FILES.messages); }
 
-/* Play next unique message (no repeats in this session) */
-function nextMessage(){
-  if (ui.amb.ended) return;            // session ends when ambient ends
-  if (!messageDeck.length){
-    setStatus("All messages played once.");
-    return;                            // no repeats; stay quiet until ambient ends
-  }
-  const choice = messageDeck.shift();  // unique pick
-  ui.msgName.textContent = nameOf(choice);
-  ui.msg.src = encodeURI(choice);
+function playCurrentMessage(){
+  if (ui.amb.ended) return;               // stop when ambient has finished
+  if (!deck.length){ setStatus("All messages played once."); return; }
+  const src = deck[0];                     // peek current
+  ui.msgName.textContent = nameOf(src);
+  ui.msg.src = encodeURI(src);
   ui.msg.currentTime = 0;
-  ui.msg.onerror = () => {             // skip any bad file, keep uniqueness
-    setStatus("Message failed, skipping…");
-    nextMessage();
-  };
-  ui.msg.onended = () => {             // hard cut; no fade
-    // tiny delay helps some mobile browsers fire events in order
-    setTimeout(nextMessage, 10);
-  };
-  ui.msg.play().catch(()=>{});         // do not touch ambient here
+  ui.msg.onerror = () => { deck.shift(); playCurrentMessage(); }; // drop bad file
+  ui.msg.onended = () => { deck.shift(); setTimeout(playCurrentMessage, 10); };
+  ui.msg.play().catch(()=>{ setStatus("Message blocked; tap Play again."); });
 }
 
 ui.start.addEventListener('click', () => {
   ui.start.disabled = true;
   setStatus("Starting…");
 
-  resetMessageDeck();                  // new non-repeating order each session
+  // Build non-repeating order for this session
+  resetDeck();
 
-  // pick ONE ambient per session
+  // Pick ONE ambient for this session
   const ambPick = shuffle(FILES.ambient)[0];
   ui.ambName.textContent = nameOf(ambPick);
   ui.amb.src = encodeURI(ambPick);
   ui.amb.currentTime = 0;
 
-  // prime both players once (helps strict autoplay policies)
-  const prime = el => el.play().then(() => { el.pause(); el.currentTime = 0; }).catch(()=>{});
-  ui.amb.muted = true; ui.msg.muted = true;
-  Promise.all([prime(ui.amb), prime(ui.msg)]).finally(() => { ui.amb.muted = false; ui.msg.muted = false; });
+  // Start BOTH players inside the same user gesture
+  // 1) set first message now so play() is allowed by the click
+  if (!deck.length){ setStatus("No messages found."); ui.start.disabled = false; return; }
+  ui.msg.src = encodeURI(deck[0]);
+  ui.msg.currentTime = 0;
+  ui.msgName.textContent = nameOf(deck[0]);
 
-  ui.amb.onloadedmetadata = () => {
-    setStatus("Ambient playing…");
-    ui.amb.play().then(() => {
-      nextMessage();
-    }).catch(() => {
-      setStatus("Ambient blocked. Tap Play again.");
+  Promise.allSettled([ ui.amb.play(), ui.msg.play() ]).then(() => {
+    setStatus("Playing…");
+    // wire events after initial start
+    ui.msg.onended = () => { deck.shift(); setTimeout(playCurrentMessage, 10); };
+    ui.msg.onerror = () => { deck.shift(); playCurrentMessage(); };
+
+    ui.amb.onended = () => {
+      try { ui.msg.pause(); } catch {}
+      setStatus("Ambient ended.");
       ui.start.disabled = false;
-    });
-  };
-
-  ui.amb.onerror = () => {
-    setStatus("Ambient failed to load. Check filename/path.");
+      ui.start.textContent = 'Play again';
+    };
+  }).catch(() => {
+    setStatus("Playback blocked. Tap Play again.");
     ui.start.disabled = false;
-  };
-
-  ui.amb.onended = () => {
-    setStatus("Ambient ended.");
-    try { ui.msg.pause(); } catch {}
-    ui.start.disabled = false;
-    ui.start.textContent = 'Play again';
-  };
-
-  try { ui.amb.load(); } catch {}
+  });
 });
 </script>
 </body>
