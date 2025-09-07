@@ -215,7 +215,7 @@ const BG = {
 const MSG_DELAY_MS = 3000;
 
 /* Cache-bust the audio file if GH Pages is sticky */
-const AUDIO_V = 35;
+const AUDIO_V = 36;
 
 const FILES = {
   ambient: [
@@ -293,7 +293,7 @@ function nextMessage(){
 }
 
 /* Ambient bucket: keep playing through shuffled list */
-function clearAmbHandlers(){ ui.amb.onended = ui.amb.onerror = null; }
+function clearAmbHandlers(){ ui.amb.onended = ui.amb.onerror = ui.amb.oncanplay = ui.amb.onloadeddata = null; }
 function playNextAmbient(){
   clearAmbHandlers();
   if (!ambDeck.length) return; // bucket exhausted -> stay quiet
@@ -305,11 +305,20 @@ function playNextAmbient(){
 
   a.src = encodeURI(src);
   a.currentTime = 0;
-  a.play().catch(() => { showPlay(); }); // if playback blocked, show button back
+
+  // Load first, then play when ready (prevents silent reset)
   try { a.load(); } catch {}
+
+  const tryPlay = () => { a.play().catch(() => { showPlay(); }); };
+  if (a.readyState >= 2) {
+    tryPlay();
+  } else {
+    a.oncanplay = tryPlay;
+    a.onloadeddata = tryPlay;
+  }
 }
 
-/* Prime audio after user gesture */
+/* Prime audio after user gesture (we only need to prime messages) */
 function prime(el){
   el.muted = true;
   return el.play().then(() => {
@@ -334,12 +343,16 @@ ui.playBtn.addEventListener('click', () => {
   resetMsgDeck();
   resetAmbDeck();
 
-  Promise.allSettled([prime(ui.amb), prime(ui.msg)]).finally(() => {
-    playNextAmbient();
+  // Start ambient immediately within the user gesture
+  playNextAmbient();
+
+  // Prime messages so they can start cleanly later
+  Promise.allSettled([prime(ui.msg)]).finally(() => {
     setTimeout(nextMessage, MSG_DELAY_MS);
   });
 
-  try{ ui.amb.load(); ui.msg.load(); }catch{}
+  // Only load the messages element explicitly
+  try{ ui.msg.load(); }catch{}
 });
 </script>
 </body>
