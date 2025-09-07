@@ -88,7 +88,6 @@
   }
   .playbtn.hidden{ display:none !important; }
 
-  /* Motion/accessibility */
   @media (prefers-reduced-motion: reduce){
     #bg-video{ display:none; }
     body{ background:#000; }
@@ -99,7 +98,7 @@
 
 <!-- Background video -->
 <video id="bg-video" autoplay muted loop playsinline preload="metadata" aria-hidden="true">
-  <source src="media/Clouds.mp4?v=11" type="video/mp4">
+  <source src="media/Clouds2.mp4?v=12" type="video/mp4">
 </video>
 
 <!-- Title -->
@@ -139,8 +138,16 @@
   setTimeout(fit, 0);
 })();
 
-/* -------- Robust mobile-safe player with shuffled ambient + messages -------- */
+/* -------- Local audio config -------- */
 const FILES = {
+  /* Add ALL your ambient tracks here; they'll shuffle with no repeats per session. */
+  ambient: [
+    "audio/ambient/track1.mp3",
+    "audio/ambient/track2.mp3",
+    "audio/ambient/track3.mp3"
+    // e.g. "audio/ambient/Aphex Twin - Stone In Focus 4.mp3"
+  ],
+  /* Your message clips — add/remove as you collect them */
   messages: [
     "audio/messages/1.mp3","audio/messages/2.mp3","audio/messages/3.mp3","audio/messages/4.mp3",
     "audio/messages/5.mp3","audio/messages/6.mp3","audio/messages/7.mp3","audio/messages/8.mp3",
@@ -162,10 +169,6 @@ const FILES = {
     "audio/messages/69.mp3","audio/messages/70.mp3","audio/messages/71.mp3","audio/messages/72.mp3",
     "audio/messages/73.mp3","audio/messages/74.mp3","audio/messages/75.mp3","audio/messages/76.mp3",
     "audio/messages/77.mp3","audio/messages/78.mp3"
-  ],
-  ambient: [
-    /* Add more tracks here as you create them; they'll be shuffled with no repeats */
-    "audio/ambient/Aphex Twin - Stone In Focus 4.mp3"
   ]
 };
 
@@ -176,13 +179,14 @@ ui.amb.loop = false;  // ambient advances to next track instead of looping one
 ui.amb.volume = 1.0;  // defaults
 ui.msg.volume = 0.5;
 
+/* Helpers */
 function shuffle(a){ const r=a.slice(); for(let i=r.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [r[i],r[j]]=[r[j],r[i]]; } return r; }
 let msgDeck = [];
 let ambDeck = [];
 function resetMsgDeck(){ msgDeck = shuffle(FILES.messages); }
 function resetAmbDeck(){ ambDeck = shuffle(FILES.ambient); }
 
-/* ------- Message chain with watchdogs ------- */
+/* ------- Message chain with watchdogs (skip stalls) ------- */
 function clearMsgHandlers(){
   const m = ui.msg;
   m.onended = m.onerror = m.onstalled = m.onsuspend = m.onwaiting =
@@ -193,23 +197,19 @@ function nextMessage(){
   const src = msgDeck.shift();
   clearMsgHandlers();
 
-  let started = false;
-  let startTimer = null;
-  let stallTimer = null;
-  let lastT = 0;
-  const m = ui.msg;
-
+  let started = false, startTimer=null, stallTimer=null, lastT=0;
   function cleanup(){ if(startTimer) clearTimeout(startTimer); if(stallTimer) clearTimeout(stallTimer); }
   function skip(){ cleanup(); nextMessage(); }
 
+  const m = ui.msg;
   m.onended = () => { cleanup(); setTimeout(nextMessage, 0); };
-  m.onerror  = () => { skip(); };
+  m.onerror = () => { skip(); };
   m.onstalled = m.onsuspend = m.onwaiting = () => {
     if (stallTimer) clearTimeout(stallTimer);
     stallTimer = setTimeout(skip, 8000); // skip if stuck
   };
   m.onloadeddata = m.oncanplay = () => { m.play().catch(()=>{}); };
-  m.onplaying = () => { started = true; if (stallTimer){ clearTimeout(stallTimer); stallTimer=null; } if (startTimer){ clearTimeout(startTimer); startTimer=null; } };
+  m.onplaying = () => { started = true; if(stallTimer){ clearTimeout(stallTimer); stallTimer=null; } if(startTimer){ clearTimeout(startTimer); startTimer=null; } };
   m.ontimeupdate = () => {
     if (m.currentTime > lastT + 0.25){ lastT = m.currentTime; if (stallTimer){ clearTimeout(stallTimer); stallTimer=null; } }
   };
@@ -225,24 +225,26 @@ function clearAmbHandlers(){ ui.amb.onended = ui.amb.onerror = null; }
 
 function playNextAmbient(){
   clearAmbHandlers();
-  if (!ambDeck.length) return; // no more ambient; keep silent (button stays hidden)
+  if (!ambDeck.length) return; // bucket exhausted -> stay quiet (button remains hidden)
   const src = ambDeck.shift();
   const a = ui.amb;
 
-  a.onended = () => { playNextAmbient(); };   // next ambient when one ends
-  a.onerror = () => { playNextAmbient(); };   // skip bad file and continue
+  // move to next ambient when one ends or file missing
+  a.onended = () => { playNextAmbient(); };
+  a.onerror = () => { playNextAmbient(); };
 
   a.src = encodeURI(src);
   a.currentTime = 0;
+
+  // If the browser refuses to start playback even after a user gesture, show the Play button back.
   a.play().catch(() => {
-    // If we cannot start *any* audio after a user gesture, show the button back
-    showPlay();
+    showPlay(); // playback error -> allow retry
   });
 
   try { a.load(); } catch {}
 }
 
-/* Prime audio after user gesture (iOS/WebKit quirks) */
+/* Prime audio after user gesture (WebKit/iOS quirk) */
 function prime(el){
   el.muted = true;
   return el.play().then(() => {
@@ -257,20 +259,20 @@ document.addEventListener('visibilitychange', () => {
   }
 }, {passive:true});
 
-/* ---------- Play button behavior: hide on press; re-show ONLY on error ---------- */
+/* ---------- Play button behavior: hide on press; re-show ONLY on playback error ---------- */
 function showPlay(){ ui.playBtn.classList.remove('hidden'); ui.playBtn.disabled = false; }
 function hidePlay(){ ui.playBtn.classList.add('hidden'); ui.playBtn.disabled = true; }
 
 ui.playBtn.addEventListener('click', () => {
-  hidePlay(); // immediately hide on press
+  hidePlay(); // hide immediately and keep hidden unless we hit an error
 
   resetMsgDeck();
   resetAmbDeck();
 
+  // Prime both players first to satisfy mobile autoplay policies
   Promise.allSettled([prime(ui.amb), prime(ui.msg)]).finally(() => {
-    // Start ambient bucket and message chain
+    // Start the ambient bucket and message chain
     playNextAmbient();
-    // Kick off the first message; chain will continue by itself
     nextMessage();
   });
 
