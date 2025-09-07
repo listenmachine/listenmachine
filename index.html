@@ -73,7 +73,7 @@
 
     padding: 14px 32px;
     border: clamp(3px, 0.6vw, 6px) solid var(--ui-color); /* thick stroke */
-    border-radius: 0;               /* rectangle (not pill) */
+    border-radius: 0;               /* rectangle */
     background: transparent;        /* no fill */
     color: var(--ui-color);         /* text matches title */
     text-transform: uppercase;
@@ -86,7 +86,6 @@
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
   }
-  /* Keep visual identical even when disabled (no dimming) */
   .playbtn:disabled{ opacity: 1; cursor: default; }
 
   /* Motion/accessibility */
@@ -100,7 +99,7 @@
 
 <!-- Background video -->
 <video id="bg-video" autoplay muted loop playsinline preload="metadata" aria-hidden="true">
-  <source src="media/Clouds.mp4?v=8" type="video/mp4">
+  <source src="media/Clouds.mp4?v=9" type="video/mp4">
 </video>
 
 <!-- Title -->
@@ -140,7 +139,7 @@
   setTimeout(fit, 0);
 })();
 
-/* -------- Minimal player (no repeats per session) -------- */
+/* -------- Robust mobile-safe player (no repeats per session) -------- */
 const FILES = {
   messages: [
     "audio/messages/1.mp3","audio/messages/2.mp3","audio/messages/3.mp3","audio/messages/4.mp3",
@@ -176,23 +175,69 @@ ui.amb.loop = false;  // ambient plays once per session
 ui.amb.volume = 1.0;  // defaults
 ui.msg.volume = 0.5;
 
+/* shuffle helper */
 function shuffle(a){ const r=a.slice(); for(let i=r.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [r[i],r[j]]=[r[j],r[i]]; } return r; }
 let deck = [];
 function resetDeck(){ deck = shuffle(FILES.messages); }
 
+/* Cleanly rewire handlers each track */
+function clearMsgHandlers(){
+  const m = ui.msg;
+  m.onended = m.onerror = m.onstalled = m.onsuspend = m.onwaiting =
+  m.onloadeddata = m.oncanplay = m.onplaying = m.ontimeupdate = null;
+}
+
+/* Play next message with watchdogs to skip stalls */
 function nextMessage(){
-  if (ui.amb.ended) return;
+  if (ui.amb.ended) return;     // stop chain when ambient is over
   if (!deck.length) return;
 
   const src = deck.shift();
-  ui.msg.onerror = () => { nextMessage(); };
-  ui.msg.onended = () => { setTimeout(nextMessage, 10); };
+  clearMsgHandlers();
 
-  ui.msg.src = encodeURI(src);
-  ui.msg.currentTime = 0;
-  ui.msg.play().catch(() => { setTimeout(() => ui.msg.play().catch(()=>{}), 50); });
+  let started = false;
+  let startTimer = null;
+  let stallTimer = null;
+  let lastT = 0;
+
+  function cleanupTimers(){ if(startTimer) clearTimeout(startTimer); if(stallTimer) clearTimeout(stallTimer); startTimer = stallTimer = null; }
+  function skip(){ cleanupTimers(); nextMessage(); }
+
+  const m = ui.msg;
+
+  m.onended = () => { cleanupTimers(); setTimeout(nextMessage, 0); };
+  m.onerror  = () => { skip(); };
+  m.onstalled = m.onsuspend = m.onwaiting = () => {
+    if (stallTimer) clearTimeout(stallTimer);
+    stallTimer = setTimeout(skip, 8000);  // if stalled too long, skip
+  };
+  m.onloadeddata = m.oncanplay = () => {
+    // try to start once we have data
+    m.play().catch(()=>{});  // if not ready, startTimer below will still guard
+  };
+  m.onplaying = () => {
+    started = true;
+    if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; }
+    if (startTimer) { clearTimeout(startTimer); startTimer = null; }
+  };
+  m.ontimeupdate = () => {
+    if (m.currentTime > lastT + 0.25){
+      lastT = m.currentTime;
+      if (stallTimer){ clearTimeout(stallTimer); stallTimer = null; }
+    }
+  };
+
+  m.src = encodeURI(src);
+  try { m.load(); } catch {}
+
+  // If it doesn't actually begin within 12s, skip it
+  startTimer = setTimeout(() => { if(!started) skip(); }, 12000);
+
+  // First attempt to play (some browsers accept this immediately)
+  m.play().catch(()=>{}); // ignore; we'll be gated by the timers/events above
 }
 
+/* Prime audio after user gesture (iOS/WebKit quirks) */
 function prime(el){
   el.muted = true;
   return el.play().then(() => {
@@ -200,8 +245,16 @@ function prime(el){
   }).catch(()=>{ el.muted = false; });
 }
 
+/* Resume logic if user returns to the tab/app */
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && !ui.amb.ended && ui.msg.paused && deck.length){
+    // Nudge the chain if we came back from background
+    nextMessage();
+  }
+}, {passive:true});
+
 ui.playBtn.addEventListener('click', () => {
-  ui.playBtn.disabled = true; // prevent double-starts (visual unchanged)
+  ui.playBtn.disabled = true; // prevent double-starts
 
   resetDeck();
   const ambPick = shuffle(FILES.ambient)[0];
