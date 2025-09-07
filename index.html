@@ -17,21 +17,24 @@
     margin: 0;
     background: #000;
     color: #fff;
-    overflow: hidden; /* splash */
+    overflow: hidden;
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
 
-  /* Full-bleed background video */
-  #bg-video{
+  /* Two stacked background videos for crossfade */
+  .bgvideo{
     position: fixed;
     inset: 0;
     width: 100%; height: 100%;
     object-fit: cover;
     z-index: 0;
     pointer-events: none;
-    filter: saturate(0.9) contrast(1.05) blur(0.3px); /* subtle VHS softness */
     background:#000;
+    filter: saturate(0.9) contrast(1.05) blur(0.3px);
+    opacity: 0;
+    transition: opacity 6000ms linear; /* slow fade; JS updates duration if you change it */
   }
+  .bgvideo.show{ opacity: 1; }
 
   /* Title near the top, single line, never clipped */
   .title-wrap{
@@ -72,10 +75,10 @@
     justify-content: center;
 
     padding: 14px 32px;
-    border: clamp(3px, 0.6vw, 6px) solid var(--ui-color); /* thick stroke */
-    border-radius: 0;               /* rectangle */
-    background: transparent;        /* no fill */
-    color: var(--ui-color);         /* text matches title */
+    border: clamp(3px, 0.6vw, 6px) solid var(--ui-color);
+    border-radius: 0;
+    background: transparent;
+    color: var(--ui-color);
     text-transform: uppercase;
     font-weight: 800;
     letter-spacing: 0.22em;
@@ -86,20 +89,23 @@
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
   }
-  .playbtn.hidden{ display:none !important; }
+  .hidden{ display:none !important; }
 
   @media (prefers-reduced-motion: reduce){
-    #bg-video{ display:none; }
+    .bgvideo{ display:none; }
     body{ background:#000; }
   }
 </style>
 </head>
 <body>
 
-<!-- Background video -->
-<video id="bg-video" autoplay muted loop playsinline preload="metadata" aria-hidden="true">
-  <source src="media/Clouds.mp4?v=12" type="video/mp4">
+<!-- Background videos -->
+<!-- A starts visible immediately (source is set in HTML so it shows even if JS fails) -->
+<video id="bgA" class="bgvideo show" muted loop playsinline preload="auto">
+  <source src="media/Clouds2.mp4?v=14" type="video/mp4">
 </video>
+<!-- B will be filled by JS after 10s, then crossfaded in -->
+<video id="bgB" class="bgvideo" muted loop playsinline preload="auto"></video>
 
 <!-- Title -->
 <div class="title-wrap">
@@ -121,33 +127,88 @@
     const container = title.parentElement;
     const maxWidth = container.clientWidth;
 
-    // initial size relative to viewport; capped
     let size = Math.min(window.innerWidth * 0.08, window.innerHeight * 0.18, 110); // px
     title.style.fontSize = size + 'px';
 
-    // shrink until single-line title fits container width
     let safety = 80;
     while (title.scrollWidth > (maxWidth - 1.5) && safety-- > 0){
       size *= 0.965;
       title.style.fontSize = size + 'px';
     }
   }
-  window.addEventListener('resize', fit, {passive:true});
-  window.addEventListener('orientationchange', fit, {passive:true});
-  window.addEventListener('load', fit);
+  addEventListener('resize', fit, {passive:true});
+  addEventListener('orientationchange', fit, {passive:true});
+  addEventListener('load', fit);
   setTimeout(fit, 0);
 })();
 
-/* -------- Local audio config -------- */
+/* ===================== BACKGROUND CROSSFADE ===================== */
+const BG = {
+  second: "media/Road1.mp4",  // fade to this
+  switchAfterMs: 10000,       // start fading after 10s
+  fadeMs: 6000                // slow fade duration
+};
+
+(function setupBackgroundFade(){
+  const A = document.getElementById('bgA');
+  const B = document.getElementById('bgB');
+
+  // keep CSS in sync if you tweak fadeMs
+  A.style.transitionDuration = BG.fadeMs + 'ms';
+  B.style.transitionDuration = BG.fadeMs + 'ms';
+
+  // Make sure A starts trying to play (muted autoplay is usually allowed)
+  const startA = () => { try { A.play(); } catch(e){} };
+  if (A.readyState >= 2) startA(); else A.addEventListener('canplay', startA, {once:true});
+
+  // After A is actually playing (or after a short fallback), start the timer
+  let timerStarted = false;
+  function startTimer(){
+    if (timerStarted) return;
+    timerStarted = true;
+    setTimeout(() => {
+      // Prepare B
+      B.src = BG.second + '?v=14';
+      const go = () => {
+        try { B.currentTime = 0; } catch {}
+        B.play().catch(()=>{});
+        // Crossfade: B in, A out
+        B.classList.add('show');
+        A.classList.remove('show');
+
+        // After fade finishes, pause/unload A (optional)
+        setTimeout(() => {
+          try { A.pause(); } catch {}
+          A.removeAttribute('src');
+          try { A.load(); } catch {}
+        }, BG.fadeMs + 50);
+      };
+      if (B.readyState >= 2) go();
+      else {
+        B.addEventListener('canplay', go, {once:true});
+        try { B.load(); } catch {}
+      }
+    }, BG.switchAfterMs);
+  }
+
+  A.addEventListener('playing', startTimer, {once:true});
+  setTimeout(startTimer, 1500); // fallback in case 'playing' is late
+})();
+</script>
+
+<script>
+/* ===================== AUDIO PLAYER (LOCAL FILES) ===================== */
+
+/* Start messages this long after pressing Play (ms). Set to 0 for immediate. */
+const MSG_DELAY_MS = 3000;
+
+/* Cache-bust the audio file if GH Pages is sticky */
+const AUDIO_V = 34;
+
 const FILES = {
-  /* Add ALL your ambient tracks here; they'll shuffle with no repeats per session. */
   ambient: [
-    "audio/ambient/track1.mp3",
-    "audio/ambient/track2.mp3",
-    "audio/ambient/track3.mp3"
-    // e.g. "audio/ambient/Aphex Twin - Stone In Focus 4.mp3"
+    "audio/ambient/Aphex Twin - Stone In Focus 4.mp3?v=" + AUDIO_V
   ],
-  /* Your message clips — add/remove as you collect them */
   messages: [
     "audio/messages/1.mp3","audio/messages/2.mp3","audio/messages/3.mp3","audio/messages/4.mp3",
     "audio/messages/5.mp3","audio/messages/6.mp3","audio/messages/7.mp3","audio/messages/8.mp3",
@@ -175,18 +236,17 @@ const FILES = {
 const $ = s => document.querySelector(s);
 const ui = { playBtn: $("#play"), amb: $("#amb"), msg: $("#msg") };
 
-ui.amb.loop = false;  // ambient advances to next track instead of looping one
-ui.amb.volume = 1.0;  // defaults
+ui.amb.loop = false;  // ambient advances through bucket (single track now, no loop)
+ui.amb.volume = 1.0;
 ui.msg.volume = 0.5;
 
-/* Helpers */
 function shuffle(a){ const r=a.slice(); for(let i=r.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [r[i],r[j]]=[r[j],r[i]]; } return r; }
 let msgDeck = [];
 let ambDeck = [];
 function resetMsgDeck(){ msgDeck = shuffle(FILES.messages); }
 function resetAmbDeck(){ ambDeck = shuffle(FILES.ambient); }
 
-/* ------- Message chain with watchdogs (skip stalls) ------- */
+/* Messages with watchdogs (skip stalls) */
 function clearMsgHandlers(){
   const m = ui.msg;
   m.onended = m.onerror = m.onstalled = m.onsuspend = m.onwaiting =
@@ -206,7 +266,7 @@ function nextMessage(){
   m.onerror = () => { skip(); };
   m.onstalled = m.onsuspend = m.onwaiting = () => {
     if (stallTimer) clearTimeout(stallTimer);
-    stallTimer = setTimeout(skip, 8000); // skip if stuck
+    stallTimer = setTimeout(skip, 8000);
   };
   m.onloadeddata = m.oncanplay = () => { m.play().catch(()=>{}); };
   m.onplaying = () => { started = true; if(stallTimer){ clearTimeout(stallTimer); stallTimer=null; } if(startTimer){ clearTimeout(startTimer); startTimer=null; } };
@@ -220,31 +280,24 @@ function nextMessage(){
   m.play().catch(()=>{});
 }
 
-/* ------- Ambient bucket: advance through shuffled list, no repeats this session ------- */
+/* Ambient bucket: keep playing through shuffled list */
 function clearAmbHandlers(){ ui.amb.onended = ui.amb.onerror = null; }
-
 function playNextAmbient(){
   clearAmbHandlers();
-  if (!ambDeck.length) return; // bucket exhausted -> stay quiet (button remains hidden)
+  if (!ambDeck.length) return; // bucket exhausted -> stay quiet
   const src = ambDeck.shift();
   const a = ui.amb;
 
-  // move to next ambient when one ends or file missing
   a.onended = () => { playNextAmbient(); };
   a.onerror = () => { playNextAmbient(); };
 
   a.src = encodeURI(src);
   a.currentTime = 0;
-
-  // If the browser refuses to start playback even after a user gesture, show the Play button back.
-  a.play().catch(() => {
-    showPlay(); // playback error -> allow retry
-  });
-
+  a.play().catch(() => { showPlay(); }); // if playback blocked, show button back
   try { a.load(); } catch {}
 }
 
-/* Prime audio after user gesture (WebKit/iOS quirk) */
+/* Prime audio after user gesture */
 function prime(el){
   el.muted = true;
   return el.play().then(() => {
@@ -259,21 +312,19 @@ document.addEventListener('visibilitychange', () => {
   }
 }, {passive:true});
 
-/* ---------- Play button behavior: hide on press; re-show ONLY on playback error ---------- */
+/* Play button: hide on press; re-show ONLY on playback error */
 function showPlay(){ ui.playBtn.classList.remove('hidden'); ui.playBtn.disabled = false; }
 function hidePlay(){ ui.playBtn.classList.add('hidden'); ui.playBtn.disabled = true; }
 
 ui.playBtn.addEventListener('click', () => {
-  hidePlay(); // hide immediately and keep hidden unless we hit an error
+  hidePlay();
 
   resetMsgDeck();
   resetAmbDeck();
 
-  // Prime both players first to satisfy mobile autoplay policies
   Promise.allSettled([prime(ui.amb), prime(ui.msg)]).finally(() => {
-    // Start the ambient bucket and message chain
     playNextAmbient();
-    nextMessage();
+    setTimeout(nextMessage, MSG_DELAY_MS);
   });
 
   try{ ui.amb.load(); ui.msg.load(); }catch{}
