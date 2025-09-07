@@ -10,9 +10,9 @@
   html, body { height: 100%; }
   body {
     margin: 0;
-    background: #000;              /* visible if video doesn't load */
+    background: #000;                  /* visible if video can't load */
     color: #fff;
-    overflow: hidden;              /* no scrollbars */
+    overflow: hidden;                  /* no scrollbars */
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
 
@@ -23,32 +23,67 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
-    z-index: 0;                    /* behind title */
-    pointer-events: none;          /* never intercept taps/clicks */
+    z-index: 0;                        /* behind title */
+    pointer-events: none;              /* never intercept taps/clicks */
     background: #000;
-    filter: saturate(0.9) contrast(1.05) blur(0.3px);
+    filter: saturate(0.9) contrast(1.05) blur(0.3px);  /* subtle VHS-ish softness */
   }
 
-  /* Centered single title */
+  /* Centered title wrapper */
   .center {
     position: relative;
     z-index: 1;
     height: 100%;
     display: grid;
     place-items: center;
-    padding: 2vh 3vw;
+    padding: 4vh 4vw;
   }
+
+  /* Big, wide-kerned, low-opacity title */
   h1 {
     margin: 0;
     text-transform: uppercase;
-    letter-spacing: 0.32em;        /* wide kerning */
-    font-weight: 700;
-    font-size: clamp(32px, 11vw, 180px);
-    line-height: 1.04;
-    color: rgba(255,255,255,0.26); /* low opacity */
     text-align: center;
+    /* Responsive size that uses viewport width but stays sane on tall/short screens */
+    font-size: clamp(28px, 11vw, 160px);
+    line-height: 1.05;
+
+    /* Wide kerning that also scales a bit with viewport size */
+    letter-spacing: clamp(0.12em, 1vw, 0.35em);
+
+    /* Low opacity over moving video */
+    color: rgba(255,255,255,0.26);
+
+    /* Make sure the word can wrap if needed so it never clips off-screen */
+    max-width: 92vw;
+    overflow-wrap: anywhere;           /* allow breaks inside long words */
+    word-break: break-word;
+    text-wrap: balance;                /* nicer line breaks where supported */
     user-select: none;
   }
+
+  /* Subtle Play button */
+  .play {
+    position: fixed;
+    left: 50%;
+    bottom: 28px;
+    transform: translateX(-50%);
+    z-index: 2;
+
+    padding: 10px 18px;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.28);
+    background: rgba(0,0,0,0.35);
+    color: rgba(255,255,255,0.9);
+    font-weight: 600;
+    font-size: 12px;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    cursor: pointer;
+    backdrop-filter: blur(2px);
+  }
+  .play:hover { background: rgba(0,0,0,0.5); }
+  .play:disabled { opacity: 0.5; cursor: default; }
 
   /* Motion/accessibility */
   @media (prefers-reduced-motion: reduce) {
@@ -61,13 +96,128 @@
 
 <!-- Background video (muted+playsinline so it autoplays on mobile) -->
 <video id="bg-video" autoplay muted loop playsinline preload="metadata" aria-hidden="true">
-  <source src="media/Clouds.mp4?v=3" type="video/mp4">
+  <source src="media/Clouds.mp4?v=4" type="video/mp4">
 </video>
 
-<!-- Minimal title only -->
+<!-- Minimal centered title only -->
 <div class="center">
   <h1>LISTENMACHINE</h1>
 </div>
 
+<!-- Subtle Play control -->
+<button id="play" class="play" type="button">Play</button>
+
+<!-- Hidden audio elements -->
+<audio id="amb" preload="auto" playsinline></audio>
+<audio id="msg" preload="auto" playsinline></audio>
+
+<script>
+/* ---- Your audio files ---- */
+const FILES = {
+  messages: [
+    "audio/messages/1.mp3","audio/messages/2.mp3","audio/messages/3.mp3","audio/messages/4.mp3",
+    "audio/messages/5.mp3","audio/messages/6.mp3","audio/messages/7.mp3","audio/messages/8.mp3",
+    "audio/messages/9.mp3","audio/messages/10.mp3","audio/messages/11.mp3","audio/messages/12.mp3",
+    "audio/messages/13.mp3","audio/messages/14.mp3","audio/messages/15.mp3","audio/messages/16.mp3",
+    "audio/messages/17.mp3","audio/messages/18.mp3","audio/messages/19.mp3","audio/messages/20.mp3",
+    "audio/messages/21.mp3","audio/messages/22.mp3","audio/messages/23.mp3","audio/messages/24.mp3",
+    "audio/messages/25.mp3","audio/messages/26.mp3","audio/messages/27.mp3","audio/messages/28.mp3",
+    "audio/messages/29.mp3","audio/messages/30.mp3","audio/messages/31.mp3","audio/messages/32.mp3",
+    "audio/messages/33.mp3","audio/messages/34.mp3","audio/messages/35.mp3","audio/messages/36.mp3",
+    "audio/messages/37.mp3","audio/messages/38.mp3","audio/messages/39.mp3","audio/messages/40.mp3",
+    "audio/messages/41.mp3","audio/messages/42.mp3","audio/messages/43.mp3","audio/messages/44.mp3",
+    "audio/messages/45.mp3","audio/messages/46.mp3","audio/messages/47.mp3","audio/messages/48.mp3",
+    "audio/messages/49.mp3","audio/messages/50.mp3","audio/messages/51.mp3","audio/messages/52.mp3",
+    "audio/messages/53.mp3","audio/messages/54.mp3","audio/messages/55.mp3","audio/messages/56.mp3",
+    "audio/messages/57.mp3","audio/messages/58.mp3","audio/messages/59.mp3","audio/messages/60.mp3",
+    "audio/messages/61.mp3","audio/messages/62.mp3","audio/messages/63.mp3","audio/messages/64.mp3",
+    "audio/messages/65.mp3","audio/messages/66.mp3","audio/messages/67.mp3","audio/messages/68.mp3",
+    "audio/messages/69.mp3","audio/messages/70.mp3","audio/messages/71.mp3","audio/messages/72.mp3",
+    "audio/messages/73.mp3","audio/messages/74.mp3","audio/messages/75.mp3","audio/messages/76.mp3",
+    "audio/messages/77.mp3","audio/messages/78.mp3"
+  ],
+  ambient: [
+    "audio/ambient/Aphex Twin - Stone In Focus 4.mp3"  // add more later; one chosen per refresh
+  ]
+};
+
+/* ---- Minimal player logic (no repeats per session) ---- */
+const $ = sel => document.querySelector(sel);
+const ui = {
+  playBtn: $("#play"),
+  amb: $("#amb"),
+  msg: $("#msg"),
+};
+
+ui.amb.loop = false;                       // ambient plays once per session
+ui.amb.volume = 1.0;                       // defaults requested
+ui.msg.volume = 0.5;
+
+function shuffle(a){ const r=a.slice(); for(let i=r.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [r[i],r[j]]=[r[j],r[i]]; } return r; }
+let deck = [];
+
+function resetDeck(){ deck = shuffle(FILES.messages); }
+
+function nextMessage(){
+  // Stop message chain once ambient is over
+  if (ui.amb.ended) return;
+  if (!deck.length) return;
+
+  const src = deck.shift();
+  ui.msg.onerror = () => { nextMessage(); };
+  ui.msg.onended = () => { setTimeout(nextMessage, 10); };
+
+  ui.msg.src = encodeURI(src);
+  ui.msg.currentTime = 0;
+  ui.msg.play().catch(() => {
+    // Occasionally the first call rejects — nudge once.
+    setTimeout(() => ui.msg.play().catch(()=>{}), 50);
+  });
+}
+
+/* Prime an <audio> element for stricter autoplay engines (requires user gesture already) */
+function prime(el){
+  el.muted = true;
+  return el.play().then(() => {
+    el.pause(); el.currentTime = 0; el.muted = false;
+  }).catch(()=>{ el.muted = false; });
+}
+
+ui.playBtn.addEventListener('click', () => {
+  ui.playBtn.disabled = true;
+
+  resetDeck();
+  const ambPick = shuffle(FILES.ambient)[0];
+
+  // Wire ambient handlers BEFORE src
+  ui.amb.onerror = () => {
+    ui.playBtn.disabled = false;
+    ui.playBtn.textContent = "Play";
+  };
+  ui.amb.onended = () => {
+    try { ui.msg.pause(); } catch {}
+    ui.playBtn.disabled = false;
+    ui.playBtn.textContent = "Play Again";
+  };
+
+  ui.amb.src = encodeURI(ambPick);
+  ui.amb.currentTime = 0;
+
+  // Prime both, then start ambient then message chain
+  Promise.allSettled([prime(ui.amb), prime(ui.msg)]).finally(() => {
+    ui.amb.play().then(() => {
+      ui.playBtn.textContent = "Playing…";
+      nextMessage();
+    }).catch(() => {
+      // If something blocks playback, allow retry
+      ui.playBtn.disabled = false;
+      ui.playBtn.textContent = "Play";
+    });
+  });
+
+  // Kick loads explicitly (helps some browsers)
+  try { ui.amb.load(); ui.msg.load(); } catch {}
+});
+</script>
 </body>
 </html>
