@@ -198,16 +198,11 @@ const BG = {
 
 <script>
 /* ===================== AUDIO PLAYER (LOCAL FILES) ===================== */
-
-/* Start messages this long after pressing Play (ms). Set to 0 for immediate. */
-const MSG_DELAY_MS = 3000;
-
-/* Cache-bust the audio file if GH Pages is sticky */
-const AUDIO_V = 34;
-
 const FILES = {
   ambient: [
-    "audio/ambient/Aphex Twin - Stone In Focus 4.mp3?v=" + AUDIO_V
+    "audio/ambient/track1.mp3",
+    "audio/ambient/track2.mp3",
+    "audio/ambient/track3.mp3"
   ],
   messages: [
     "audio/messages/1.mp3","audio/messages/2.mp3","audio/messages/3.mp3","audio/messages/4.mp3",
@@ -236,8 +231,8 @@ const FILES = {
 const $ = s => document.querySelector(s);
 const ui = { playBtn: $("#play"), amb: $("#amb"), msg: $("#msg") };
 
-ui.amb.loop = false;  // ambient advances through bucket (single track now, no loop)
-ui.amb.volume = 1.0;
+ui.amb.loop = false;  // ambient advances through bucket
+ui.amb.volume = 1.0;  // defaults
 ui.msg.volume = 0.5;
 
 function shuffle(a){ const r=a.slice(); for(let i=r.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [r[i],r[j]]=[r[j],r[i]]; } return r; }
@@ -324,7 +319,7 @@ ui.playBtn.addEventListener('click', () => {
 
   Promise.allSettled([prime(ui.amb), prime(ui.msg)]).finally(() => {
     playNextAmbient();
-    setTimeout(nextMessage, MSG_DELAY_MS);
+    nextMessage();
   });
 
   try{ ui.amb.load(); ui.msg.load(); }catch{}
