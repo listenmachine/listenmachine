@@ -95,7 +95,7 @@
 
 <!-- Background videos -->
 <video id="bgA" class="bgvideo show" muted loop playsinline preload="auto">
-  <source src="media/Clouds2.mp4?v=17" type="video/mp4">
+  <source src="media/Clouds2.mp4?v=18" type="video/mp4">
 </video>
 <video id="bgB" class="bgvideo" muted loop playsinline preload="auto"></video>
 
@@ -150,7 +150,7 @@ const BG = {
   function startTimer(){
     if (timerStarted) return; timerStarted = true;
     setTimeout(() => {
-      B.src = BG.second + '?v=17';
+      B.src = BG.second + '?v=18';
       const go = () => {
         try { B.currentTime = 0; } catch {}
         B.play().catch(()=>{});
@@ -175,10 +175,9 @@ const BG = {
 <script>
 /* ===================== AUDIO PLAYER (LOCAL FILES) ===================== */
 const FILES = {
-  /* Ambient bucket — change to your real file(s). If empty or missing, messages still start. */
+  /* Ambient bucket — Aphex Twin track active here */
   ambient: [
-    // Example: replace with yours or leave empty
-    // "audio/ambient/Aphex Twin - Stone In Focus 4.mp3"
+    "audio/ambient/Aphex Twin - Stone In Focus 4.mp3"
   ],
   /* Message clips (shuffled, no repeats per session) */
   messages: [
@@ -281,7 +280,7 @@ function playNextAmbient(){
       ambientStarted = true;
       if (!messagesStarted){
         messagesStarted = true;
-        setTimeout(nextMessage, 3000);  // <<< wait 3s after ambient actually starts
+        setTimeout(nextMessage, 3000);  // wait 3s after ambient actually starts
       }
     }
   };
@@ -289,9 +288,7 @@ function playNextAmbient(){
   a.src = encodeURI(src);
   a.currentTime = 0;
 
-  // Kick off ambient; if the browser blocks it, we’ll show PLAY again
   a.play().catch(() => { showPlay(); });
-
   try { a.load(); } catch {}
 }
 
@@ -330,7 +327,6 @@ ui.playBtn.addEventListener('click', () => {
   messagesStarted = false;
   ambientStarted = false;
 
-  // Prime both players first to satisfy mobile autoplay policies
   Promise.allSettled([prime(ui.amb), prime(ui.msg)]).finally(() => {
     playNextAmbient();
 
