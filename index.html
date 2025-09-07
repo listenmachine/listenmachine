@@ -4,16 +4,16 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>ListenMachine</title>
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="dark light" />
 <style>
-  /* Reset / base */
+  /* Base */
   html, body { height: 100%; }
   body {
     margin: 0;
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    background: #000;           /* fallback if video can't load */
+    background: #000;              /* visible if video doesn't load */
     color: #fff;
-    overflow: hidden;           /* no scrollbars; pure splash */
+    overflow: hidden;              /* no scrollbars */
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
 
   /* Full-bleed background video */
@@ -23,14 +23,13 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
-    z-index: 0;                 /* behind title */
-    pointer-events: none;       /* never intercept taps/clicks */
+    z-index: 0;                    /* behind title */
+    pointer-events: none;          /* never intercept taps/clicks */
     background: #000;
-    /* Mild VHS-ish softness; keep it subtle */
     filter: saturate(0.9) contrast(1.05) blur(0.3px);
   }
 
-  /* Centered title */
+  /* Centered single title */
   .center {
     position: relative;
     z-index: 1;
@@ -39,22 +38,19 @@
     place-items: center;
     padding: 2vh 3vw;
   }
-
   h1 {
     margin: 0;
-    text-transform: uppercase;               /* matches old aesthetic */
-    letter-spacing: 0.28em;                  /* wide kerning */
+    text-transform: uppercase;
+    letter-spacing: 0.32em;        /* wide kerning */
     font-weight: 700;
-    /* Very large but responsive */
-    font-size: clamp(28px, 10vw, 160px);
-    line-height: 1.05;
-    /* Low opacity look over moving video */
-    color: rgba(255,255,255,0.28);
+    font-size: clamp(32px, 11vw, 180px);
+    line-height: 1.04;
+    color: rgba(255,255,255,0.26); /* low opacity */
     text-align: center;
     user-select: none;
   }
 
-  /* Motion accessibility */
+  /* Motion/accessibility */
   @media (prefers-reduced-motion: reduce) {
     #bg-video { display: none; }
     body { background: #000; }
@@ -63,13 +59,12 @@
 </head>
 <body>
 
-<!-- Background video (muted so it can autoplay on mobile) -->
+<!-- Background video (muted+playsinline so it autoplays on mobile) -->
 <video id="bg-video" autoplay muted loop playsinline preload="metadata" aria-hidden="true">
-  <source src="media/Clouds.mp4?v=1" type="video/mp4">
-  <!-- Optional: add a WebM source above later if you export one -->
+  <source src="media/Clouds.mp4?v=3" type="video/mp4">
 </video>
 
-<!-- Minimal centered title only -->
+<!-- Minimal title only -->
 <div class="center">
   <h1>LISTENMACHINE</h1>
 </div>
