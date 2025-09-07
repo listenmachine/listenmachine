@@ -110,7 +110,7 @@
 <script>
 /* ===================== SETTINGS / VERSION ===================== */
 /* Bump VERSION whenever you push new media so caches refresh. */
-const VERSION = 30;
+const VERSION = 31;
 
 /* Your exact ambient filename (spaces and case must match): */
 const AMBIENT_FILENAME = "Aphex Twin - Stone In Focus 4.mp3";
@@ -214,7 +214,7 @@ const FILES = {
 const $ = s => document.querySelector(s);
 const ui = { playBtn: $("#play"), amb: $("#amb"), msg: $("#msg") };
 
-ui.amb.loop = false;      // don't loop the ambient (you can change later)
+ui.amb.loop = false;      // don't loop the ambient (change later if you want)
 ui.amb.volume = 1.0;      // music full volume
 ui.msg.volume = 0.5;      // messages half volume
 
@@ -223,7 +223,9 @@ let msgDeck = [];
 let ambDeck = [];
 let messagesStarted = false;
 let ambientStarted = false;
+let somethingStarted = false; // tracks any successful playback (ambient or message)
 
+function markStarted(){ if(!somethingStarted){ somethingStarted = true; console.log("Playback started."); } }
 function resetMsgDeck(){ msgDeck = shuffle(FILES.messages); }
 function resetAmbDeck(){ ambDeck = shuffle(FILES.ambient || []); }
 
@@ -250,7 +252,7 @@ function nextMessage(){
     stallTimer = setTimeout(skip, 8000);
   };
   m.onloadeddata = m.oncanplay = () => { m.play().catch(()=>{}); };
-  m.onplaying = () => { started = true; if(stallTimer){ clearTimeout(stallTimer); stallTimer=null; } if(startTimer){ clearTimeout(startTimer); startTimer=null; } };
+  m.onplaying = () => { started = true; markStarted(); if(stallTimer){ clearTimeout(stallTimer); stallTimer=null; } if(startTimer){ clearTimeout(startTimer); startTimer=null; } };
   m.ontimeupdate = () => {
     if (m.currentTime > lastT + 0.25){ lastT = m.currentTime; if (stallTimer){ clearTimeout(stallTimer); stallTimer=null; } }
   };
@@ -261,17 +263,17 @@ function nextMessage(){
   m.play().catch(()=>{});
 }
 
-/* Ambient bucket: try to play; if none/blocked, start messages anyway */
+/* Ambient bucket: try to play; if none/blocked, messages still start via fallback */
 function clearAmbHandlers(){ ui.amb.onended = ui.amb.onerror = ui.amb.onplaying = null; }
 
 function playNextAmbient(){
   clearAmbHandlers();
 
   if (!ambDeck.length){
-    // No ambient available -> just start messages after a small delay
+    console.warn("No ambient in deck; messages will run without music.");
     if (!messagesStarted){
       messagesStarted = true;
-      setTimeout(nextMessage, 1000);
+      setTimeout(nextMessage, 800);
     }
     return;
   }
@@ -279,10 +281,11 @@ function playNextAmbient(){
   const src = ambDeck.shift();
   const a = ui.amb;
 
-  a.onended = () => { console.log("Ambient ended:", a.src); /* don't loop; do nothing */ };
-  a.onerror  = () => { console.warn("Ambient failed to load/play:", a.src); /* still keep PLAY hidden */ };
+  a.onended = () => { console.log("Ambient ended:", a.src); /* no loop */ };
+  a.onerror  = () => { console.warn("Ambient failed to load/play:", a.src); /* messages fallback already scheduled */ };
 
   a.onplaying = () => {
+    markStarted();
     if (!ambientStarted){
       ambientStarted = true;
       if (!messagesStarted){
@@ -295,17 +298,16 @@ function playNextAmbient(){
   a.src = encodeURI(src);
   a.currentTime = 0;
 
-  // Keep the PLAY button hidden even on error; messages will still run
-  a.play().catch(() => {});
+  a.play().catch((e) => { console.warn("Ambient play() rejected:", e && e.message); });
   try { a.load(); } catch {}
 }
 
-/* Prime audio after user gesture (fixes mobile autoplay) */
+/* Prime audio after user gesture (fixes mobile autoplay). Safe across browsers. */
 function prime(el){
   el.muted = true;
   return el.play().then(() => {
     el.pause(); el.currentTime = 0; el.muted = false;
-  }).catch(()=>{ el.muted = false; });
+  }).catch((e)=>{ el.muted = false; console.warn("Prime failed (ok):", e && e.message); });
 }
 
 /* Resume nudges when returning to foreground */
@@ -316,7 +318,13 @@ document.addEventListener('visibilitychange', () => {
   }
 }, {passive:true});
 
-/* Play button: hide on press; never re-show automatically */
+/* Play button: hide on press; re-show only if NOTHING starts within 8s */
+function showPlay(label = "PLAY"){
+  ui.playBtn.textContent = label;
+  ui.playBtn.classList.remove('hidden');
+  ui.playBtn.style.display = '';
+  ui.playBtn.disabled = false;
+}
 function hidePlay(){
   ui.playBtn.classList.add('hidden');
   ui.playBtn.style.display = 'none';
@@ -325,25 +333,48 @@ function hidePlay(){
 
 ui.playBtn.addEventListener('click', () => {
   hidePlay();  // vanish immediately
+  console.log("Play clicked.");
 
   resetMsgDeck();
   resetAmbDeck();
   messagesStarted = false;
   ambientStarted = false;
+  somethingStarted = false;
 
-  Promise.allSettled([prime(ui.amb), prime(ui.msg)]).finally(() => {
-    playNextAmbient();
+  // Always schedule a messages fallback so "nothing happens" can’t occur.
+  const msgFallback = setTimeout(() => {
+    if (!messagesStarted){
+      console.log("Starting messages via fallback.");
+      messagesStarted = true;
+      nextMessage();
+    }
+  }, 2000);
 
-    // Fallback: if ambient hasn't started within 6s, start messages anyway
-    setTimeout(() => {
-      if (!messagesStarted){
-        messagesStarted = true;
-        nextMessage();
-      }
-    }, 6000);
-  });
+  // Panic timer: if neither ambient nor first message has started, re-show PLAY.
+  const panic = setTimeout(() => {
+    if (!somethingStarted){
+      console.warn("No playback started in time. Showing PLAY again.");
+      showPlay("TRY AGAIN");
+    }
+  }, 8000);
 
-  try{ ui.amb.load(); ui.msg.load(); }catch{}
+  // Safe priming without allSettled
+  Promise.all([prime(ui.amb), prime(ui.msg)].map(p => p.catch(()=>{})))
+    .then(() => {
+      playNextAmbient();
+      // additional fallback in case ambient doesn't kick 'playing'
+      setTimeout(() => {
+        if (!messagesStarted){
+          console.log("Secondary messages fallback.");
+          messagesStarted = true;
+          nextMessage();
+        }
+      }, 6000);
+    })
+    .catch(() => {
+      // Even if priming throws, our fallbacks still handle starting messages.
+      console.warn("Priming threw unexpectedly; relying on fallbacks.");
+    });
 });
 </script>
 </body>
