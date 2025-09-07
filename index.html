@@ -12,7 +12,7 @@
     margin: 0;
     background: #000;                  /* visible if video can't load */
     color: #fff;
-    overflow: hidden;                  /* no scrollbars */
+    overflow: hidden;                  /* pure splash */
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
 
@@ -23,67 +23,69 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
-    z-index: 0;                        /* behind title */
-    pointer-events: none;              /* never intercept taps/clicks */
+    z-index: 0;                        /* behind overlays */
+    pointer-events: none;
     background: #000;
-    filter: saturate(0.9) contrast(1.05) blur(0.3px);  /* subtle VHS-ish softness */
+    filter: saturate(0.9) contrast(1.05) blur(0.3px); /* subtle VHS-ish softness */
   }
 
-  /* Centered title wrapper */
-  .center {
-    position: relative;
-    z-index: 1;
-    height: 100%;
-    display: grid;
-    place-items: center;
-    padding: 4vh 4vw;
+  /* Title near the top, always fully visible */
+  .title-wrap {
+    position: fixed;
+    top: clamp(18px, 10vh, 120px);     /* near top on all screens */
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(92vw, 1200px);          /* keep inside viewport */
+    z-index: 2;
+    text-align: center;
+    pointer-events: none;
+    padding-inline: 2vw;
   }
-
-  /* Big, wide-kerned, low-opacity title */
   h1 {
     margin: 0;
     text-transform: uppercase;
     text-align: center;
-    /* Responsive size that uses viewport width but stays sane on tall/short screens */
-    font-size: clamp(28px, 11vw, 160px);
-    line-height: 1.05;
 
-    /* Wide kerning that also scales a bit with viewport size */
-    letter-spacing: clamp(0.12em, 1vw, 0.35em);
+    /* Responsive sizing that respects both width and height */
+    font-size: clamp(28px, 9vw, 120px);
+    line-height: 1.06;
 
-    /* Low opacity over moving video */
+    /* Wide kerning but not so wide it forces overflow */
+    letter-spacing: clamp(0.12em, 0.9vw, 0.28em);
+
+    /* Low-opacity over moving video */
     color: rgba(255,255,255,0.26);
 
-    /* Make sure the word can wrap if needed so it never clips off-screen */
-    max-width: 92vw;
-    overflow-wrap: anywhere;           /* allow breaks inside long words */
-    word-break: break-word;
-    text-wrap: balance;                /* nicer line breaks where supported */
+    /* Ensure it never clips: allow wrapping anywhere if needed */
+    max-width: 100%;
+    overflow-wrap: anywhere;    /* modern */
+    word-break: break-word;     /* fallback */
+    text-wrap: balance;         /* nicer breaks where supported */
     user-select: none;
   }
 
-  /* Subtle Play button */
+  /* Center Play button */
   .play {
     position: fixed;
     left: 50%;
-    bottom: 28px;
-    transform: translateX(-50%);
-    z-index: 2;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 3;
 
-    padding: 10px 18px;
+    padding: 12px 22px;
     border-radius: 999px;
     border: 1px solid rgba(255,255,255,0.28);
-    background: rgba(0,0,0,0.35);
-    color: rgba(255,255,255,0.9);
-    font-weight: 600;
-    font-size: 12px;
+    background: rgba(0,0,0,0.38);
+    color: rgba(255,255,255,0.95);
+    font-weight: 700;
+    font-size: 13px;
     letter-spacing: .22em;
     text-transform: uppercase;
     cursor: pointer;
     backdrop-filter: blur(2px);
   }
   .play:hover { background: rgba(0,0,0,0.5); }
-  .play:disabled { opacity: 0.5; cursor: default; }
+  .play:disabled { opacity: 0.55; cursor: default; }
 
   /* Motion/accessibility */
   @media (prefers-reduced-motion: reduce) {
@@ -96,15 +98,15 @@
 
 <!-- Background video (muted+playsinline so it autoplays on mobile) -->
 <video id="bg-video" autoplay muted loop playsinline preload="metadata" aria-hidden="true">
-  <source src="media/Clouds.mp4?v=4" type="video/mp4">
+  <source src="media/Clouds.mp4?v=5" type="video/mp4">
 </video>
 
-<!-- Minimal centered title only -->
-<div class="center">
-  <h1>LISTENMACHINE</h1>
+<!-- Minimal title (wrapping enabled + planned soft break) -->
+<div class="title-wrap">
+  <h1>LISTEN<wbr>MACHINE</h1>
 </div>
 
-<!-- Subtle Play control -->
+<!-- Center Play control -->
 <button id="play" class="play" type="button">Play</button>
 
 <!-- Hidden audio elements -->
@@ -149,18 +151,16 @@ const ui = {
   msg: $("#msg"),
 };
 
-ui.amb.loop = false;                       // ambient plays once per session
-ui.amb.volume = 1.0;                       // defaults requested
+ui.amb.loop = false;   // ambient plays once per session
+ui.amb.volume = 1.0;   // defaults requested
 ui.msg.volume = 0.5;
 
 function shuffle(a){ const r=a.slice(); for(let i=r.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [r[i],r[j]]=[r[j],r[i]]; } return r; }
 let deck = [];
-
 function resetDeck(){ deck = shuffle(FILES.messages); }
 
 function nextMessage(){
-  // Stop message chain once ambient is over
-  if (ui.amb.ended) return;
+  if (ui.amb.ended) return; // stop after ambient finishes
   if (!deck.length) return;
 
   const src = deck.shift();
@@ -170,12 +170,11 @@ function nextMessage(){
   ui.msg.src = encodeURI(src);
   ui.msg.currentTime = 0;
   ui.msg.play().catch(() => {
-    // Occasionally the first call rejects — nudge once.
     setTimeout(() => ui.msg.play().catch(()=>{}), 50);
   });
 }
 
-/* Prime an <audio> element for stricter autoplay engines (requires user gesture already) */
+/* Prime audio element after user gesture (for stricter autoplay engines) */
 function prime(el){
   el.muted = true;
   return el.play().then(() => {
@@ -189,7 +188,6 @@ ui.playBtn.addEventListener('click', () => {
   resetDeck();
   const ambPick = shuffle(FILES.ambient)[0];
 
-  // Wire ambient handlers BEFORE src
   ui.amb.onerror = () => {
     ui.playBtn.disabled = false;
     ui.playBtn.textContent = "Play";
@@ -203,19 +201,16 @@ ui.playBtn.addEventListener('click', () => {
   ui.amb.src = encodeURI(ambPick);
   ui.amb.currentTime = 0;
 
-  // Prime both, then start ambient then message chain
   Promise.allSettled([prime(ui.amb), prime(ui.msg)]).finally(() => {
     ui.amb.play().then(() => {
       ui.playBtn.textContent = "Playing…";
       nextMessage();
     }).catch(() => {
-      // If something blocks playback, allow retry
       ui.playBtn.disabled = false;
       ui.playBtn.textContent = "Play";
     });
   });
 
-  // Kick loads explicitly (helps some browsers)
   try { ui.amb.load(); ui.msg.load(); } catch {}
 });
 </script>
