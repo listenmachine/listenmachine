@@ -55,7 +55,7 @@
         </div>
       </div>
 
-      <footer>Tip: if nothing plays, double-check the ambient filename below matches exactly (case sensitive).</footer>
+      <footer>Tip: if nothing plays, open the ambient file directly to confirm the path: <code>/audio/ambient/Aphex Twin - Stone In Focus 4.mp3</code> (case sensitive).</footer>
     </main>
   </div>
 
@@ -65,87 +65,29 @@
   // ─────────────────────────────────────────────────────────────────────────────
   const FILES = {
     messages: [
-      "audio/messages/1.mp3",
-      "audio/messages/2.mp3",
-      "audio/messages/3.mp3",
-      "audio/messages/4.mp3",
-      "audio/messages/5.mp3",
-      "audio/messages/6.mp3",
-      "audio/messages/7.mp3",
-      "audio/messages/8.mp3",
-      "audio/messages/9.mp3",
-      "audio/messages/10.mp3",
-      "audio/messages/11.mp3",
-      "audio/messages/12.mp3",
-      "audio/messages/13.mp3",
-      "audio/messages/14.mp3",
-      "audio/messages/15.mp3",
-      "audio/messages/16.mp3",
-      "audio/messages/17.mp3",
-      "audio/messages/18.mp3",
-      "audio/messages/19.mp3",
-      "audio/messages/20.mp3",
-      "audio/messages/21.mp3",
-      "audio/messages/22.mp3",
-      "audio/messages/23.mp3",
-      "audio/messages/24.mp3",
-      "audio/messages/25.mp3",
-      "audio/messages/26.mp3",
-      "audio/messages/27.mp3",
-      "audio/messages/28.mp3",
-      "audio/messages/29.mp3",
-      "audio/messages/30.mp3",
-      "audio/messages/31.mp3",
-      "audio/messages/32.mp3",
-      "audio/messages/33.mp3",
-      "audio/messages/34.mp3",
-      "audio/messages/35.mp3",
-      "audio/messages/36.mp3",
-      "audio/messages/37.mp3",
-      "audio/messages/38.mp3",
-      "audio/messages/39.mp3",
-      "audio/messages/40.mp3",
-      "audio/messages/41.mp3",
-      "audio/messages/42.mp3",
-      "audio/messages/43.mp3",
-      "audio/messages/44.mp3",
-      "audio/messages/45.mp3",
-      "audio/messages/46.mp3",
-      "audio/messages/47.mp3",
-      "audio/messages/48.mp3",
-      "audio/messages/49.mp3",
-      "audio/messages/50.mp3",
-      "audio/messages/51.mp3",
-      "audio/messages/52.mp3",
-      "audio/messages/53.mp3",
-      "audio/messages/54.mp3",
-      "audio/messages/55.mp3",
-      "audio/messages/56.mp3",
-      "audio/messages/57.mp3",
-      "audio/messages/58.mp3",
-      "audio/messages/59.mp3",
-      "audio/messages/60.mp3",
-      "audio/messages/61.mp3",
-      "audio/messages/62.mp3",
-      "audio/messages/63.mp3",
-      "audio/messages/64.mp3",
-      "audio/messages/65.mp3",
-      "audio/messages/66.mp3",
-      "audio/messages/67.mp3",
-      "audio/messages/68.mp3",
-      "audio/messages/69.mp3",
-      "audio/messages/70.mp3",
-      "audio/messages/71.mp3",
-      "audio/messages/72.mp3",
-      "audio/messages/73.mp3",
-      "audio/messages/74.mp3",
-      "audio/messages/75.mp3",
-      "audio/messages/76.mp3",
-      "audio/messages/77.mp3",
-      "audio/messages/78.mp3"
+      "audio/messages/1.mp3","audio/messages/2.mp3","audio/messages/3.mp3","audio/messages/4.mp3",
+      "audio/messages/5.mp3","audio/messages/6.mp3","audio/messages/7.mp3","audio/messages/8.mp3",
+      "audio/messages/9.mp3","audio/messages/10.mp3","audio/messages/11.mp3","audio/messages/12.mp3",
+      "audio/messages/13.mp3","audio/messages/14.mp3","audio/messages/15.mp3","audio/messages/16.mp3",
+      "audio/messages/17.mp3","audio/messages/18.mp3","audio/messages/19.mp3","audio/messages/20.mp3",
+      "audio/messages/21.mp3","audio/messages/22.mp3","audio/messages/23.mp3","audio/messages/24.mp3",
+      "audio/messages/25.mp3","audio/messages/26.mp3","audio/messages/27.mp3","audio/messages/28.mp3",
+      "audio/messages/29.mp3","audio/messages/30.mp3","audio/messages/31.mp3","audio/messages/32.mp3",
+      "audio/messages/33.mp3","audio/messages/34.mp3","audio/messages/35.mp3","audio/messages/36.mp3",
+      "audio/messages/37.mp3","audio/messages/38.mp3","audio/messages/39.mp3","audio/messages/40.mp3",
+      "audio/messages/41.mp3","audio/messages/42.mp3","audio/messages/43.mp3","audio/messages/44.mp3",
+      "audio/messages/45.mp3","audio/messages/46.mp3","audio/messages/47.mp3","audio/messages/48.mp3",
+      "audio/messages/49.mp3","audio/messages/50.mp3","audio/messages/51.mp3","audio/messages/52.mp3",
+      "audio/messages/53.mp3","audio/messages/54.mp3","audio/messages/55.mp3","audio/messages/56.mp3",
+      "audio/messages/57.mp3","audio/messages/58.mp3","audio/messages/59.mp3","audio/messages/60.mp3",
+      "audio/messages/61.mp3","audio/messages/62.mp3","audio/messages/63.mp3","audio/messages/64.mp3",
+      "audio/messages/65.mp3","audio/messages/66.mp3","audio/messages/67.mp3","audio/messages/68.mp3",
+      "audio/messages/69.mp3","audio/messages/70.mp3","audio/messages/71.mp3","audio/messages/72.mp3",
+      "audio/messages/73.mp3","audio/messages/74.mp3","audio/messages/75.mp3","audio/messages/76.mp3",
+      "audio/messages/77.mp3","audio/messages/78.mp3"
     ],
     ambient: [
-      "audio/ambient/Aphex Twin - Stone In Focus 4.mp3" // ← CHANGE THIS to your real file name
+      "audio/ambient/Aphex Twin - Stone In Focus 4.mp3"  // ensure this filename matches exactly
     ]
   };
 
@@ -153,7 +95,7 @@
   const MANIFEST_URL = null;
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 2) Utilities: seeded RNG for shareable pairings, helpers
+  // 2) Utilities
   // ─────────────────────────────────────────────────────────────────────────────
   function xmur3(str){ let h=1779033703^str.length; for(let i=0;i<str.length;i++){ h=Math.imul(h^str.charCodeAt(i),3432918353); h=h<<13|h>>>19; } return function(){ h=Math.imul(h^h>>>16,2246822507); h=Math.imul(h^h>>>13,3266489909); return (h^h>>>16)>>>0; } }
   function mulberry32(a){ return function(){ let t=a+=0x6D2B79F5; t=Math.imul(t^t>>>15,t|1); t^=t+Math.imul(t^t>>>7,t|61); return ((t^t>>>14)>>>0)/4294967296; } }
@@ -162,7 +104,7 @@
   function shortName(url){ try { const u = new URL(url, location.href); return decodeURIComponent(u.pathname.split('/').pop()); } catch { return url.split('/').pop() || url; } }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 3) Audio graph management
+  // 3) Audio
   // ─────────────────────────────────────────────────────────────────────────────
   let ctx, master, msgGain, ambGain;
   let current = { ambSrc:null, msgSrc:null };
@@ -199,13 +141,8 @@
   ui.msgVol.addEventListener('input', () => { if (msgGain) msgGain.gain.setTargetAtTime(parseFloat(ui.msgVol.value), ctx.currentTime, 0.01); });
   ui.ambVol.addEventListener('input', () => { if (ambGain) ambGain.gain.setTargetAtTime(parseFloat(ui.ambVol.value), ctx.currentTime, 0.01); });
 
-  // Graceful stop of current sources
-  function stopNow(){
-    try { if (current.msgSrc) { current.msgSrc.stop(); current.msgSrc.disconnect(); } } catch {}
-    try { if (current.ambSrc) { current.ambSrc.stop(); current.ambSrc.disconnect(); } } catch {}
-    current.msgSrc = current.ambSrc = null;
-    if (lastAbort) { lastAbort.abort(); lastAbort = null; }
-  }
+  function setBar(p){ ui.bar.style.width = `${Math.max(0, Math.min(1,p))*100}%`; }
+  function pairNamesToUI(msgUrl, ambUrl){ ui.msgName.textContent = shortName(msgUrl); ui.ambName.textContent = shortName(ambUrl); }
 
   async function loadBuffer(url){
     const ctrl = new AbortController();
@@ -213,17 +150,10 @@
     const res = await fetch(url, { signal: ctrl.signal });
     if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
     const buf = await res.arrayBuffer();
-    try {
-      return await ctx.decodeAudioData(buf);
-    } catch (e) {
-      throw new Error(`Decode failed for ${url}`);
-    }
+    try { return await ctx.decodeAudioData(buf); }
+    catch { throw new Error(`Decode failed for ${url}`); }
   }
 
-  function setBar(p){ ui.bar.style.width = `${Math.max(0, Math.min(1,p))*100}%`; }
-  function pairNamesToUI(msgUrl, ambUrl){ ui.msgName.textContent = shortName(msgUrl); ui.ambName.textContent = shortName(ambUrl); }
-
-  // Remove a bad file and continue
   function removeFrom(listName, url){
     const arr = FILES[listName];
     const i = arr.indexOf(url);
@@ -238,7 +168,6 @@
     ui.seed.textContent = baseSeed;
     const rng = mulberry32(xmur3(baseSeed)());
 
-    // Make sure we still have choices
     if (!FILES.messages.length || !FILES.ambient.length){
       alert('No playable files found. Double-check your arrays and filenames.');
       return;
@@ -250,15 +179,78 @@
     pairNamesToUI(pickMsg, pickAmb);
     setBar(0.05);
 
-    // Load one by one so we can skip any bad file gracefully
     let msgBuf, ambBuf;
     try { msgBuf = await loadBuffer(pickMsg); }
-    catch (e) {
-      console.warn(e.message);
-      removeFrom('messages', pickMsg);
-      return pickAndPlay(); // try again with another pick
-    }
+    catch (e) { console.warn(e.message); removeFrom('messages', pickMsg); return pickAndPlay(); }
+
     try { ambBuf = await loadBuffer(pickAmb); }
-    catch (e) {
-      console.warn(e.message);
-      rem
+    catch (e) { console.warn(e.message); removeFrom('ambient', pickAmb); return pickAndPlay(); }
+
+    const msgSrc = ctx.createBufferSource(); msgSrc.buffer = msgBuf; msgSrc.connect(msgGain);
+    const ambSrc = ctx.createBufferSource(); ambSrc.buffer = ambBuf; ambSrc.connect(ambGain);
+    current.msgSrc = msgSrc; current.ambSrc = ambSrc;
+
+    const msgLen = msgBuf.duration;
+    const ambLen = ambBuf.duration;
+    let ambOff = 0;
+    if (ambLen > msgLen) {
+      const rng2 = mulberry32(xmur3(baseSeed + '-offset')());
+      ambOff = rng2() * Math.max(0, ambLen - msgLen);
+    }
+
+    const now = ctx.currentTime + 0.05;
+    const fade = 0.75;
+
+    msgGain.gain.setValueAtTime(0.0001, now);
+    msgGain.gain.exponentialRampToValueAtTime(parseFloat(ui.msgVol.value) || 0.9, now + fade);
+
+    ambGain.gain.setValueAtTime(0.0001, now);
+    ambGain.gain.exponentialRampToValueAtTime(parseFloat(ui.ambVol.value) || 0.35, now + fade);
+
+    msgSrc.start(now);
+    ambSrc.start(now, ambOff);
+
+    const runLen = Math.min(msgLen, Math.max(0.01, ambLen - ambOff));
+    const endAt = now + runLen;
+
+    msgGain.gain.setTargetAtTime(0.0001, endAt - 0.6, 0.25);
+    ambGain.gain.setTargetAtTime(0.0001, endAt - 0.6, 0.25);
+
+    msgSrc.stop(endAt + 0.05);
+    ambSrc.stop(endAt + 0.05);
+
+    msgSrc.addEventListener('ended', () => { setBar(0); pickAndPlay(); });
+
+    ui.len.textContent = formatSec(runLen);
+
+    const t0 = performance.now();
+    function tick(){
+      const dt = (performance.now() - t0) / 1000;
+      setBar(Math.min(1, dt / runLen));
+      if (dt < runLen) requestAnimationFrame(tick); else setBar(1);
+    }
+    requestAnimationFrame(tick);
+  }
+
+  async function boot(){
+    if (MANIFEST_URL){
+      try {
+        const r = await fetch(MANIFEST_URL);
+        const j = await r.json();
+        if (Array.isArray(j.messages)) FILES.messages = j.messages;
+        if (Array.isArray(j.ambient)) FILES.ambient = j.ambient;
+      } catch (e) { console.warn('Manifest fetch failed', e); }
+    }
+  }
+
+  ui.start.addEventListener('click', async () => {
+    ui.start.disabled = true;
+    await boot();
+    try { await ctx?.resume?.(); } catch {}
+    pickAndPlay('start');
+  });
+
+  document.addEventListener('DOMContentLoaded', boot);
+  </script>
+</body>
+</html>
