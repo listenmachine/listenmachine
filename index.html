@@ -17,11 +17,11 @@
     margin: 0;
     background: #000;
     color: #fff;
-    overflow: hidden; /* splash */
+    overflow: hidden;
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
 
-  /* Two stacked background videos for the crossfade */
+  /* Two stacked background videos for crossfade */
   .bgvideo{
     position: fixed;
     inset: 0;
@@ -30,9 +30,9 @@
     z-index: 0;
     pointer-events: none;
     background:#000;
-    filter: saturate(0.9) contrast(1.05) blur(0.3px); /* subtle VHS-ish softness */
+    filter: saturate(0.9) contrast(1.05) blur(0.3px);
     opacity: 0;
-    transition: opacity 6000ms linear; /* JS will sync this with BG.fadeMs */
+    transition: opacity 6000ms linear; /* slow fade; JS updates duration if you change it */
   }
   .bgvideo.show{ opacity: 1; }
 
@@ -75,10 +75,10 @@
     justify-content: center;
 
     padding: 14px 32px;
-    border: clamp(3px, 0.6vw, 6px) solid var(--ui-color); /* thick stroke */
-    border-radius: 0;               /* rectangle */
-    background: transparent;        /* no fill */
-    color: var(--ui-color);         /* text matches title */
+    border: clamp(3px, 0.6vw, 6px) solid var(--ui-color);
+    border-radius: 0;
+    background: transparent;
+    color: var(--ui-color);
     text-transform: uppercase;
     font-weight: 800;
     letter-spacing: 0.22em;
@@ -99,8 +99,12 @@
 </head>
 <body>
 
-<!-- Background video pair (for crossfade) -->
-<video id="bgA" class="bgvideo" muted loop playsinline preload="auto"></video>
+<!-- Background videos -->
+<!-- A starts visible immediately (source is set in HTML so it shows even if JS fails) -->
+<video id="bgA" class="bgvideo show" muted loop playsinline preload="auto">
+  <source src="media/Clouds2.mp4?v=14" type="video/mp4">
+</video>
+<!-- B will be filled by JS after 10s, then crossfaded in -->
 <video id="bgB" class="bgvideo" muted loop playsinline preload="auto"></video>
 
 <!-- Title -->
@@ -123,38 +127,203 @@
     const container = title.parentElement;
     const maxWidth = container.clientWidth;
 
-    // initial size relative to viewport; capped
     let size = Math.min(window.innerWidth * 0.08, window.innerHeight * 0.18, 110); // px
     title.style.fontSize = size + 'px';
 
-    // shrink until single-line title fits container width
     let safety = 80;
     while (title.scrollWidth > (maxWidth - 1.5) && safety-- > 0){
       size *= 0.965;
       title.style.fontSize = size + 'px';
     }
   }
-  window.addEventListener('resize', fit, {passive:true});
-  window.addEventListener('orientationchange', fit, {passive:true});
-  window.addEventListener('load', fit);
+  addEventListener('resize', fit, {passive:true});
+  addEventListener('orientationchange', fit, {passive:true});
+  addEventListener('load', fit);
   setTimeout(fit, 0);
 })();
 
-/* ===================== BACKGROUND CROSSFADE (Clouds2 -> Road1) ===================== */
+/* ===================== BACKGROUND CROSSFADE ===================== */
 const BG = {
-  first: "media/Clouds2.mp4",
-  second: "media/Road1.mp4",
-  switchAfterMs: 10000,  // start fading after 10s
-  fadeMs: 6000           // slow fade (6s)
+  second: "media/Road1.mp4",  // fade to this
+  switchAfterMs: 10000,       // start fading after 10s
+  fadeMs: 6000                // slow fade duration
 };
 
 (function setupBackgroundFade(){
   const A = document.getElementById('bgA');
   const B = document.getElementById('bgB');
 
-  // sync CSS transition duration with config
+  // keep CSS in sync if you tweak fadeMs
   A.style.transitionDuration = BG.fadeMs + 'ms';
   B.style.transitionDuration = BG.fadeMs + 'ms';
 
-  // helper to set src with a tiny cache-buster
-  const setSrc = (el, src) => {
+  // Make sure A starts trying to play (muted autoplay is usually allowed)
+  const startA = () => { try { A.play(); } catch(e){} };
+  if (A.readyState >= 2) startA(); else A.addEventListener('canplay', startA, {once:true});
+
+  // After A is actually playing (or after a short fallback), start the timer
+  let timerStarted = false;
+  function startTimer(){
+    if (timerStarted) return;
+    timerStarted = true;
+    setTimeout(() => {
+      // Prepare B
+      B.src = BG.second + '?v=14';
+      const go = () => {
+        try { B.currentTime = 0; } catch {}
+        B.play().catch(()=>{});
+        // Crossfade: B in, A out
+        B.classList.add('show');
+        A.classList.remove('show');
+
+        // After fade finishes, pause/unload A (optional)
+        setTimeout(() => {
+          try { A.pause(); } catch {}
+          A.removeAttribute('src');
+          try { A.load(); } catch {}
+        }, BG.fadeMs + 50);
+      };
+      if (B.readyState >= 2) go();
+      else {
+        B.addEventListener('canplay', go, {once:true});
+        try { B.load(); } catch {}
+      }
+    }, BG.switchAfterMs);
+  }
+
+  A.addEventListener('playing', startTimer, {once:true});
+  setTimeout(startTimer, 1500); // fallback in case 'playing' is late
+})();
+</script>
+
+<script>
+/* ===================== AUDIO PLAYER (LOCAL FILES) ===================== */
+const FILES = {
+  ambient: [
+    "audio/ambient/track1.mp3",
+    "audio/ambient/track2.mp3",
+    "audio/ambient/track3.mp3"
+  ],
+  messages: [
+    "audio/messages/1.mp3","audio/messages/2.mp3","audio/messages/3.mp3","audio/messages/4.mp3",
+    "audio/messages/5.mp3","audio/messages/6.mp3","audio/messages/7.mp3","audio/messages/8.mp3",
+    "audio/messages/9.mp3","audio/messages/10.mp3","audio/messages/11.mp3","audio/messages/12.mp3",
+    "audio/messages/13.mp3","audio/messages/14.mp3","audio/messages/15.mp3","audio/messages/16.mp3",
+    "audio/messages/17.mp3","audio/messages/18.mp3","audio/messages/19.mp3","audio/messages/20.mp3",
+    "audio/messages/21.mp3","audio/messages/22.mp3","audio/messages/23.mp3","audio/messages/24.mp3",
+    "audio/messages/25.mp3","audio/messages/26.mp3","audio/messages/27.mp3","audio/messages/28.mp3",
+    "audio/messages/29.mp3","audio/messages/30.mp3","audio/messages/31.mp3","audio/messages/32.mp3",
+    "audio/messages/33.mp3","audio/messages/34.mp3","audio/messages/35.mp3","audio/messages/36.mp3",
+    "audio/messages/37.mp3","audio/messages/38.mp3","audio/messages/39.mp3","audio/messages/40.mp3",
+    "audio/messages/41.mp3","audio/messages/42.mp3","audio/messages/43.mp3","audio/messages/44.mp3",
+    "audio/messages/45.mp3","audio/messages/46.mp3","audio/messages/47.mp3","audio/messages/48.mp3",
+    "audio/messages/49.mp3","audio/messages/50.mp3","audio/messages/51.mp3","audio/messages/52.mp3",
+    "audio/messages/53.mp3","audio/messages/54.mp3","audio/messages/55.mp3","audio/messages/56.mp3",
+    "audio/messages/57.mp3","audio/messages/58.mp3","audio/messages/59.mp3","audio/messages/60.mp3",
+    "audio/messages/61.mp3","audio/messages/62.mp3","audio/messages/63.mp3","audio/messages/64.mp3",
+    "audio/messages/65.mp3","audio/messages/66.mp3","audio/messages/67.mp3","audio/messages/68.mp3",
+    "audio/messages/69.mp3","audio/messages/70.mp3","audio/messages/71.mp3","audio/messages/72.mp3",
+    "audio/messages/73.mp3","audio/messages/74.mp3","audio/messages/75.mp3","audio/messages/76.mp3",
+    "audio/messages/77.mp3","audio/messages/78.mp3"
+  ]
+};
+
+const $ = s => document.querySelector(s);
+const ui = { playBtn: $("#play"), amb: $("#amb"), msg: $("#msg") };
+
+ui.amb.loop = false;  // ambient advances through bucket
+ui.amb.volume = 1.0;  // defaults
+ui.msg.volume = 0.5;
+
+function shuffle(a){ const r=a.slice(); for(let i=r.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [r[i],r[j]]=[r[j],r[i]]; } return r; }
+let msgDeck = [];
+let ambDeck = [];
+function resetMsgDeck(){ msgDeck = shuffle(FILES.messages); }
+function resetAmbDeck(){ ambDeck = shuffle(FILES.ambient); }
+
+/* Messages with watchdogs (skip stalls) */
+function clearMsgHandlers(){
+  const m = ui.msg;
+  m.onended = m.onerror = m.onstalled = m.onsuspend = m.onwaiting =
+  m.onloadeddata = m.oncanplay = m.onplaying = m.ontimeupdate = null;
+}
+function nextMessage(){
+  if (!msgDeck.length) return;
+  const src = msgDeck.shift();
+  clearMsgHandlers();
+
+  let started = false, startTimer=null, stallTimer=null, lastT=0;
+  function cleanup(){ if(startTimer) clearTimeout(startTimer); if(stallTimer) clearTimeout(stallTimer); }
+  function skip(){ cleanup(); nextMessage(); }
+
+  const m = ui.msg;
+  m.onended = () => { cleanup(); setTimeout(nextMessage, 0); };
+  m.onerror = () => { skip(); };
+  m.onstalled = m.onsuspend = m.onwaiting = () => {
+    if (stallTimer) clearTimeout(stallTimer);
+    stallTimer = setTimeout(skip, 8000);
+  };
+  m.onloadeddata = m.oncanplay = () => { m.play().catch(()=>{}); };
+  m.onplaying = () => { started = true; if(stallTimer){ clearTimeout(stallTimer); stallTimer=null; } if(startTimer){ clearTimeout(startTimer); startTimer=null; } };
+  m.ontimeupdate = () => {
+    if (m.currentTime > lastT + 0.25){ lastT = m.currentTime; if (stallTimer){ clearTimeout(stallTimer); stallTimer=null; } }
+  };
+
+  m.src = encodeURI(src);
+  try { m.load(); } catch {}
+  startTimer = setTimeout(() => { if(!started) skip(); }, 12000);
+  m.play().catch(()=>{});
+}
+
+/* Ambient bucket: keep playing through shuffled list */
+function clearAmbHandlers(){ ui.amb.onended = ui.amb.onerror = null; }
+function playNextAmbient(){
+  clearAmbHandlers();
+  if (!ambDeck.length) return; // bucket exhausted -> stay quiet
+  const src = ambDeck.shift();
+  const a = ui.amb;
+
+  a.onended = () => { playNextAmbient(); };
+  a.onerror = () => { playNextAmbient(); };
+
+  a.src = encodeURI(src);
+  a.currentTime = 0;
+  a.play().catch(() => { showPlay(); }); // if playback blocked, show button back
+  try { a.load(); } catch {}
+}
+
+/* Prime audio after user gesture */
+function prime(el){
+  el.muted = true;
+  return el.play().then(() => {
+    el.pause(); el.currentTime = 0; el.muted = false;
+  }).catch(()=>{ el.muted = false; });
+}
+
+/* Resume nudge when returning to foreground */
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && ui.msg.paused && msgDeck.length){
+    nextMessage();
+  }
+}, {passive:true});
+
+/* Play button: hide on press; re-show ONLY on playback error */
+function showPlay(){ ui.playBtn.classList.remove('hidden'); ui.playBtn.disabled = false; }
+function hidePlay(){ ui.playBtn.classList.add('hidden'); ui.playBtn.disabled = true; }
+
+ui.playBtn.addEventListener('click', () => {
+  hidePlay();
+
+  resetMsgDeck();
+  resetAmbDeck();
+
+  Promise.allSettled([prime(ui.amb), prime(ui.msg)]).finally(() => {
+    playNextAmbient();
+    nextMessage();
+  });
+
+  try{ ui.amb.load(); ui.msg.load(); }catch{}
+});
+</script>
+</body>
+</html>
