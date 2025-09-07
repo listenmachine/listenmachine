@@ -29,7 +29,7 @@
   <div class="wrap">
     <main class="card">
       <h1>ListenMachine</h1>
-      <p>Press <strong>Play</strong> once to allow audio. It will then keep pairing a random message with a random ambient track forever.</p>
+      <p>Press <strong>Play</strong> once to allow audio. The ambient track plays in full; messages start/stop over it until the ambient ends.</p>
 
       <div class="row">
         <button id="start">Play</button>
@@ -41,7 +41,7 @@
           <span class="pill">Message: <span id="msgName">—</span></span>
           <span class="pill">Ambient: <span id="ambName">—</span></span>
           <span class="pill">Seed: <span id="seed">—</span></span>
-          <span class="pill">Length: <span id="len">—</span></span>
+          <span class="pill">Ambient length: <span id="len">—</span></span>
         </div>
         <div class="grid">
           <div>
@@ -55,4 +55,14 @@
         </div>
       </div>
 
-      <footer>Tip: if nothing plays, open y
+      <footer>To add more ambients later, just list them below; one is picked per refresh. No fades on messages by design.</footer>
+    </main>
+  </div>
+
+  <script>
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 1) FILE LISTS (same-origin relative URLs)
+  // ─────────────────────────────────────────────────────────────────────────────
+  const FILES = {
+    messages: [
+      "audio/messages/1.mp3","audio/messages/2.mp3","audio/me
