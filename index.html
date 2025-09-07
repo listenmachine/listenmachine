@@ -21,17 +21,20 @@
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
 
-  /* Full-bleed background video */
-  #bg-video{
+  /* Two stacked background videos for the crossfade */
+  .bgvideo{
     position: fixed;
     inset: 0;
     width: 100%; height: 100%;
     object-fit: cover;
     z-index: 0;
     pointer-events: none;
-    filter: saturate(0.9) contrast(1.05) blur(0.3px); /* subtle VHS softness */
     background:#000;
+    filter: saturate(0.9) contrast(1.05) blur(0.3px); /* subtle VHS-ish softness */
+    opacity: 0;
+    transition: opacity 6000ms linear; /* JS will sync this with BG.fadeMs */
   }
+  .bgvideo.show{ opacity: 1; }
 
   /* Title near the top, single line, never clipped */
   .title-wrap{
@@ -86,20 +89,19 @@
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
   }
-  .playbtn.hidden{ display:none !important; }
+  .hidden{ display:none !important; }
 
   @media (prefers-reduced-motion: reduce){
-    #bg-video{ display:none; }
+    .bgvideo{ display:none; }
     body{ background:#000; }
   }
 </style>
 </head>
 <body>
 
-<!-- Background video -->
-<video id="bg-video" autoplay muted loop playsinline preload="metadata" aria-hidden="true">
-  <source src="media/Clouds2.mp4?v=12" type="video/mp4">
-</video>
+<!-- Background video pair (for crossfade) -->
+<video id="bgA" class="bgvideo" muted loop playsinline preload="auto"></video>
+<video id="bgB" class="bgvideo" muted loop playsinline preload="auto"></video>
 
 <!-- Title -->
 <div class="title-wrap">
@@ -138,146 +140,21 @@
   setTimeout(fit, 0);
 })();
 
-/* -------- Local audio config -------- */
-const FILES = {
-  /* Add ALL your ambient tracks here; they'll shuffle with no repeats per session. */
-  ambient: [
-    "audio/ambient/track1.mp3",
-    "audio/ambient/track2.mp3",
-    "audio/ambient/track3.mp3"
-    // e.g. "audio/ambient/Aphex Twin - Stone In Focus 4.mp3"
-  ],
-  /* Your message clips — add/remove as you collect them */
-  messages: [
-    "audio/messages/1.mp3","audio/messages/2.mp3","audio/messages/3.mp3","audio/messages/4.mp3",
-    "audio/messages/5.mp3","audio/messages/6.mp3","audio/messages/7.mp3","audio/messages/8.mp3",
-    "audio/messages/9.mp3","audio/messages/10.mp3","audio/messages/11.mp3","audio/messages/12.mp3",
-    "audio/messages/13.mp3","audio/messages/14.mp3","audio/messages/15.mp3","audio/messages/16.mp3",
-    "audio/messages/17.mp3","audio/messages/18.mp3","audio/messages/19.mp3","audio/messages/20.mp3",
-    "audio/messages/21.mp3","audio/messages/22.mp3","audio/messages/23.mp3","audio/messages/24.mp3",
-    "audio/messages/25.mp3","audio/messages/26.mp3","audio/messages/27.mp3","audio/messages/28.mp3",
-    "audio/messages/29.mp3","audio/messages/30.mp3","audio/messages/31.mp3","audio/messages/32.mp3",
-    "audio/messages/33.mp3","audio/messages/34.mp3","audio/messages/35.mp3","audio/messages/36.mp3",
-    "audio/messages/37.mp3","audio/messages/38.mp3","audio/messages/39.mp3","audio/messages/40.mp3",
-    "audio/messages/41.mp3","audio/messages/42.mp3","audio/messages/43.mp3","audio/messages/44.mp3",
-    "audio/messages/45.mp3","audio/messages/46.mp3","audio/messages/47.mp3","audio/messages/48.mp3",
-    "audio/messages/49.mp3","audio/messages/50.mp3","audio/messages/51.mp3","audio/messages/52.mp3",
-    "audio/messages/53.mp3","audio/messages/54.mp3","audio/messages/55.mp3","audio/messages/56.mp3",
-    "audio/messages/57.mp3","audio/messages/58.mp3","audio/messages/59.mp3","audio/messages/60.mp3",
-    "audio/messages/61.mp3","audio/messages/62.mp3","audio/messages/63.mp3","audio/messages/64.mp3",
-    "audio/messages/65.mp3","audio/messages/66.mp3","audio/messages/67.mp3","audio/messages/68.mp3",
-    "audio/messages/69.mp3","audio/messages/70.mp3","audio/messages/71.mp3","audio/messages/72.mp3",
-    "audio/messages/73.mp3","audio/messages/74.mp3","audio/messages/75.mp3","audio/messages/76.mp3",
-    "audio/messages/77.mp3","audio/messages/78.mp3"
-  ]
+/* ===================== BACKGROUND CROSSFADE (Clouds2 -> Road1) ===================== */
+const BG = {
+  first: "media/Clouds2.mp4",
+  second: "media/Road1.mp4",
+  switchAfterMs: 10000,  // start fading after 10s
+  fadeMs: 6000           // slow fade (6s)
 };
 
-const $ = s => document.querySelector(s);
-const ui = { playBtn: $("#play"), amb: $("#amb"), msg: $("#msg") };
+(function setupBackgroundFade(){
+  const A = document.getElementById('bgA');
+  const B = document.getElementById('bgB');
 
-ui.amb.loop = false;  // ambient advances to next track instead of looping one
-ui.amb.volume = 1.0;  // defaults
-ui.msg.volume = 0.5;
+  // sync CSS transition duration with config
+  A.style.transitionDuration = BG.fadeMs + 'ms';
+  B.style.transitionDuration = BG.fadeMs + 'ms';
 
-/* Helpers */
-function shuffle(a){ const r=a.slice(); for(let i=r.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [r[i],r[j]]=[r[j],r[i]]; } return r; }
-let msgDeck = [];
-let ambDeck = [];
-function resetMsgDeck(){ msgDeck = shuffle(FILES.messages); }
-function resetAmbDeck(){ ambDeck = shuffle(FILES.ambient); }
-
-/* ------- Message chain with watchdogs (skip stalls) ------- */
-function clearMsgHandlers(){
-  const m = ui.msg;
-  m.onended = m.onerror = m.onstalled = m.onsuspend = m.onwaiting =
-  m.onloadeddata = m.oncanplay = m.onplaying = m.ontimeupdate = null;
-}
-function nextMessage(){
-  if (!msgDeck.length) return;
-  const src = msgDeck.shift();
-  clearMsgHandlers();
-
-  let started = false, startTimer=null, stallTimer=null, lastT=0;
-  function cleanup(){ if(startTimer) clearTimeout(startTimer); if(stallTimer) clearTimeout(stallTimer); }
-  function skip(){ cleanup(); nextMessage(); }
-
-  const m = ui.msg;
-  m.onended = () => { cleanup(); setTimeout(nextMessage, 0); };
-  m.onerror = () => { skip(); };
-  m.onstalled = m.onsuspend = m.onwaiting = () => {
-    if (stallTimer) clearTimeout(stallTimer);
-    stallTimer = setTimeout(skip, 8000); // skip if stuck
-  };
-  m.onloadeddata = m.oncanplay = () => { m.play().catch(()=>{}); };
-  m.onplaying = () => { started = true; if(stallTimer){ clearTimeout(stallTimer); stallTimer=null; } if(startTimer){ clearTimeout(startTimer); startTimer=null; } };
-  m.ontimeupdate = () => {
-    if (m.currentTime > lastT + 0.25){ lastT = m.currentTime; if (stallTimer){ clearTimeout(stallTimer); stallTimer=null; } }
-  };
-
-  m.src = encodeURI(src);
-  try { m.load(); } catch {}
-  startTimer = setTimeout(() => { if(!started) skip(); }, 12000);
-  m.play().catch(()=>{});
-}
-
-/* ------- Ambient bucket: advance through shuffled list, no repeats this session ------- */
-function clearAmbHandlers(){ ui.amb.onended = ui.amb.onerror = null; }
-
-function playNextAmbient(){
-  clearAmbHandlers();
-  if (!ambDeck.length) return; // bucket exhausted -> stay quiet (button remains hidden)
-  const src = ambDeck.shift();
-  const a = ui.amb;
-
-  // move to next ambient when one ends or file missing
-  a.onended = () => { playNextAmbient(); };
-  a.onerror = () => { playNextAmbient(); };
-
-  a.src = encodeURI(src);
-  a.currentTime = 0;
-
-  // If the browser refuses to start playback even after a user gesture, show the Play button back.
-  a.play().catch(() => {
-    showPlay(); // playback error -> allow retry
-  });
-
-  try { a.load(); } catch {}
-}
-
-/* Prime audio after user gesture (WebKit/iOS quirk) */
-function prime(el){
-  el.muted = true;
-  return el.play().then(() => {
-    el.pause(); el.currentTime = 0; el.muted = false;
-  }).catch(()=>{ el.muted = false; });
-}
-
-/* Resume nudge when returning to foreground */
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden && ui.msg.paused && msgDeck.length){
-    nextMessage();
-  }
-}, {passive:true});
-
-/* ---------- Play button behavior: hide on press; re-show ONLY on playback error ---------- */
-function showPlay(){ ui.playBtn.classList.remove('hidden'); ui.playBtn.disabled = false; }
-function hidePlay(){ ui.playBtn.classList.add('hidden'); ui.playBtn.disabled = true; }
-
-ui.playBtn.addEventListener('click', () => {
-  hidePlay(); // hide immediately and keep hidden unless we hit an error
-
-  resetMsgDeck();
-  resetAmbDeck();
-
-  // Prime both players first to satisfy mobile autoplay policies
-  Promise.allSettled([prime(ui.amb), prime(ui.msg)]).finally(() => {
-    // Start the ambient bucket and message chain
-    playNextAmbient();
-    nextMessage();
-  });
-
-  try{ ui.amb.load(); ui.msg.load(); }catch{}
-});
-</script>
-</body>
-</html>
+  // helper to set src with a tiny cache-buster
+  const setSrc = (el, src) => {
