@@ -7,7 +7,7 @@
 <meta name="color-scheme" content="dark light" />
 <style>
   :root{
-    --ui-alpha: 0.26;                  /* one knob for title + button opacity */
+    --ui-alpha: 0.26;
     --ui-color: rgba(255,255,255,var(--ui-alpha));
   }
 
@@ -20,70 +20,52 @@
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
 
-  /* Two stacked background videos for crossfade */
   .bgvideo{
-    position: fixed;
-    inset: 0;
+    position: fixed; inset: 0;
     width: 100%; height: 100%;
     object-fit: cover;
-    z-index: 0;
-    pointer-events: none;
+    z-index: 0; pointer-events: none;
     background:#000;
     filter: saturate(0.9) contrast(1.05) blur(0.3px);
     opacity: 0;
-    transition: opacity 10000ms linear; /* 10s slow fade */
+    transition: opacity 10000ms linear;
   }
   .bgvideo.show{ opacity: 1; }
 
-  /* Title near the top, single line, never clipped */
   .title-wrap{
     position: fixed;
     top: clamp(12px, 8vh, 96px);
-    left: 50%;
-    transform: translateX(-50%);
+    left: 50%; transform: translateX(-50%);
     width: min(92vw, 1200px);
-    z-index: 2;
-    text-align: center;
-    pointer-events: none;
+    z-index: 2; text-align: center; pointer-events: none;
     padding-inline: 2vw;
   }
   #title{
-    margin: 0;
-    text-transform: uppercase;
-    white-space: nowrap;
-    letter-spacing: 0.18em;
-    font-weight: 700;
-    line-height: 1.06;
-    color: var(--ui-color);
-    user-select: none;
-    font-size: 8vw; /* JS shrinks to fit exactly */
-    will-change: font-size;
+    margin: 0; text-transform: uppercase; white-space: nowrap;
+    letter-spacing: 0.18em; font-weight: 700; line-height: 1.06;
+    color: var(--ui-color); user-select: none;
+    font-size: 8vw; will-change: font-size;
   }
 
-  /* Center Play button */
   .playbtn{
-    position: fixed;
-    left: 50%; top: 50%;
-    transform: translate(-50%,-50%);
-    z-index: 3;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%);
+    z-index: 3; display: inline-flex; align-items: center; justify-content: center;
     padding: 14px 32px;
     border: clamp(3px, 0.6vw, 6px) solid var(--ui-color);
-    border-radius: 0;
-    background: transparent;
-    color: var(--ui-color);
-    text-transform: uppercase;
-    font-weight: 800;
-    letter-spacing: 0.22em;
-    font-size: clamp(12px, 2.6vw, 18px);
-    line-height: 1;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-    touch-action: manipulation;
+    border-radius: 0; background: transparent; color: var(--ui-color);
+    text-transform: uppercase; font-weight: 800; letter-spacing: 0.22em;
+    font-size: clamp(12px, 2.6vw, 18px); line-height: 1; cursor: pointer;
+    -webkit-tap-highlight-color: transparent; touch-action: manipulation;
   }
   .hidden{ display:none !important; }
+
+  /* Tiny toast to confirm audio start */
+  .toast{
+    position: fixed; right: 12px; bottom: 12px; z-index: 4;
+    background: rgba(255,255,255,0.08); color:#fff; padding:10px 14px;
+    border: 1px solid rgba(255,255,255,0.25);
+    font-size: 12px; letter-spacing: .06em; text-transform: uppercase;
+  }
 
   @media (prefers-reduced-motion: reduce){
     .bgvideo{ display:none; }
@@ -103,16 +85,16 @@
 <!-- Center Play button -->
 <button id="play" class="playbtn" type="button" aria-label="Play">PLAY</button>
 
+<!-- Tiny toast (hidden until used) -->
+<div id="toast" class="toast hidden"></div>
+
 <!-- Hidden audio elements -->
 <audio id="amb" preload="auto" playsinline></audio>
 <audio id="msg" preload="auto" playsinline></audio>
 
 <script>
 /* ===================== SETTINGS / VERSION ===================== */
-/* Bump VERSION whenever you push new media so caches refresh. */
-const VERSION = 31;
-
-/* Your exact ambient filename (spaces and case must match): */
+const VERSION = 32; // bump to bust cache when you push
 const AMBIENT_FILENAME = "Aphex Twin - Stone In Focus 4.mp3";
 
 /* -------- Auto-fit title to ONE line (never clipped) -------- */
@@ -139,8 +121,8 @@ const AMBIENT_FILENAME = "Aphex Twin - Stone In Focus 4.mp3";
 const BG = {
   first:  "media/Clouds2.mp4",
   second: "media/Road1.mp4",
-  switchAfterMs: 10000,  // start fading after 10s
-  fadeMs: 10000          // fade lasts 10s
+  switchAfterMs: 10000,
+  fadeMs: 10000
 };
 
 (function setupBackgroundFade(){
@@ -149,9 +131,7 @@ const BG = {
   A.style.transitionDuration = BG.fadeMs + 'ms';
   B.style.transitionDuration = BG.fadeMs + 'ms';
 
-  // set sources with cache-buster
   A.src = `${BG.first}?v=${VERSION}`;
-
   const startA = () => { try { A.play(); } catch(e){} };
   if (A.readyState >= 2) startA(); else A.addEventListener('canplay', startA, {once:true});
 
@@ -167,26 +147,21 @@ const BG = {
         A.classList.remove('show'); // fade A out
         setTimeout(() => {
           try { A.pause(); } catch {}
-          A.removeAttribute('src');
-          try { A.load(); } catch {}
+          A.removeAttribute('src'); try { A.load(); } catch {}
         }, BG.fadeMs + 60);
       };
-      if (B.readyState >= 2) go();
-      else { B.addEventListener('canplay', go, {once:true}); try { B.load(); } catch {} }
+      if (B.readyState >= 2) go(); else { B.addEventListener('canplay', go, {once:true}); try { B.load(); } catch {} }
     }, BG.switchAfterMs);
   }
-
   A.addEventListener('playing', startTimer, {once:true});
-  setTimeout(startTimer, 1500); // fallback in case 'playing' is late
+  setTimeout(startTimer, 1500);
 })();
 </script>
 
 <script>
 /* ===================== AUDIO PLAYER (LOCAL FILES) ===================== */
 const FILES = {
-  ambient: [
-    `audio/ambient/${AMBIENT_FILENAME}?v=${VERSION}`
-  ],
+  ambient: [ `audio/ambient/${AMBIENT_FILENAME}?v=${VERSION}` ],
   messages: [
     "audio/messages/1.mp3","audio/messages/2.mp3","audio/messages/3.mp3","audio/messages/4.mp3",
     "audio/messages/5.mp3","audio/messages/6.mp3","audio/messages/7.mp3","audio/messages/8.mp3",
@@ -212,24 +187,24 @@ const FILES = {
 };
 
 const $ = s => document.querySelector(s);
-const ui = { playBtn: $("#play"), amb: $("#amb"), msg: $("#msg") };
+const ui = { playBtn: $("#play"), amb: $("#amb"), msg: $("#msg"), toast: $("#toast") };
 
-ui.amb.loop = false;      // don't loop the ambient (change later if you want)
-ui.amb.volume = 1.0;      // music full volume
-ui.msg.volume = 0.5;      // messages half volume
+ui.amb.loop = false;
+ui.amb.volume = 1.0;
+ui.msg.volume = 0.5;
 
 function shuffle(a){ const r=a.slice(); for(let i=r.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [r[i],r[j]]=[r[j],r[i]]; } return r; }
 let msgDeck = [];
 let ambDeck = [];
 let messagesStarted = false;
 let ambientStarted = false;
-let somethingStarted = false; // tracks any successful playback (ambient or message)
+let somethingStarted = false;
 
-function markStarted(){ if(!somethingStarted){ somethingStarted = true; console.log("Playback started."); } }
 function resetMsgDeck(){ msgDeck = shuffle(FILES.messages); }
 function resetAmbDeck(){ ambDeck = shuffle(FILES.ambient || []); }
+function showToast(txt){ ui.toast.textContent = txt; ui.toast.classList.remove('hidden'); setTimeout(()=>ui.toast.classList.add('hidden'), 2000); }
 
-/* Messages with watchdogs (skip stalls) */
+/* -------- Messages (load → play on canplay) -------- */
 function clearMsgHandlers(){
   const m = ui.msg;
   m.onended = m.onerror = m.onstalled = m.onsuspend = m.onwaiting =
@@ -251,8 +226,8 @@ function nextMessage(){
     if (stallTimer) clearTimeout(stallTimer);
     stallTimer = setTimeout(skip, 8000);
   };
-  m.onloadeddata = m.oncanplay = () => { m.play().catch(()=>{}); };
-  m.onplaying = () => { started = true; markStarted(); if(stallTimer){ clearTimeout(stallTimer); stallTimer=null; } if(startTimer){ clearTimeout(startTimer); startTimer=null; } };
+  m.oncanplay = () => { m.play().catch(()=>{}); };
+  m.onplaying = () => { started = true; somethingStarted = true; if(stallTimer){ clearTimeout(stallTimer); stallTimer=null; } if(startTimer){ clearTimeout(startTimer); startTimer=null; } };
   m.ontimeupdate = () => {
     if (m.currentTime > lastT + 0.25){ lastT = m.currentTime; if (stallTimer){ clearTimeout(stallTimer); stallTimer=null; } }
   };
@@ -260,57 +235,52 @@ function nextMessage(){
   m.src = encodeURI(src);
   try { m.load(); } catch {}
   startTimer = setTimeout(() => { if(!started) skip(); }, 12000);
-  m.play().catch(()=>{});
 }
 
-/* Ambient bucket: try to play; if none/blocked, messages still start via fallback */
-function clearAmbHandlers(){ ui.amb.onended = ui.amb.onerror = ui.amb.onplaying = null; }
-
+/* -------- Ambient (load → play on canplay) -------- */
 function playNextAmbient(){
-  clearAmbHandlers();
+  ui.amb.oncanplay = ui.amb.onplaying = ui.amb.onerror = ui.amb.onended = null;
 
   if (!ambDeck.length){
     console.warn("No ambient in deck; messages will run without music.");
-    if (!messagesStarted){
-      messagesStarted = true;
-      setTimeout(nextMessage, 800);
-    }
+    if (!messagesStarted){ messagesStarted = true; setTimeout(nextMessage, 800); }
     return;
   }
 
   const src = ambDeck.shift();
   const a = ui.amb;
 
-  a.onended = () => { console.log("Ambient ended:", a.src); /* no loop */ };
-  a.onerror  = () => { console.warn("Ambient failed to load/play:", a.src); /* messages fallback already scheduled */ };
-
+  a.oncanplay = () => {
+    a.play().then(()=>{
+      // Stone In Focus fades in—confirm visually
+      showToast("Now playing: ambient");
+    }).catch(e => console.warn("Ambient play() rejected:", e && e.message));
+  };
   a.onplaying = () => {
-    markStarted();
+    somethingStarted = true;
     if (!ambientStarted){
       ambientStarted = true;
       if (!messagesStarted){
         messagesStarted = true;
-        setTimeout(nextMessage, 3000);  // wait ~3s after ambient actually starts
+        setTimeout(nextMessage, 3000); // wait ~3s after ambient actually starts
       }
     }
   };
+  a.onerror  = () => { console.warn("Ambient failed to load/play:", a.src); };
 
   a.src = encodeURI(src);
-  a.currentTime = 0;
-
-  a.play().catch((e) => { console.warn("Ambient play() rejected:", e && e.message); });
   try { a.load(); } catch {}
 }
 
-/* Prime audio after user gesture (fixes mobile autoplay). Safe across browsers. */
+/* -------- Priming (safe across browsers) -------- */
 function prime(el){
   el.muted = true;
   return el.play().then(() => {
     el.pause(); el.currentTime = 0; el.muted = false;
-  }).catch((e)=>{ el.muted = false; console.warn("Prime failed (ok):", e && e.message); });
+  }).catch(()=>{ el.muted = false; /* fine if it fails; click is enough */ });
 }
 
-/* Resume nudges when returning to foreground */
+/* -------- Visibility resume nudges -------- */
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden){
     if (ui.amb.paused && ambientStarted) { ui.amb.play().catch(()=>{}); }
@@ -318,7 +288,7 @@ document.addEventListener('visibilitychange', () => {
   }
 }, {passive:true});
 
-/* Play button: hide on press; re-show only if NOTHING starts within 8s */
+/* -------- Play button logic -------- */
 function showPlay(label = "PLAY"){
   ui.playBtn.textContent = label;
   ui.playBtn.classList.remove('hidden');
@@ -332,8 +302,7 @@ function hidePlay(){
 }
 
 ui.playBtn.addEventListener('click', () => {
-  hidePlay();  // vanish immediately
-  console.log("Play clicked.");
+  hidePlay();
 
   resetMsgDeck();
   resetAmbDeck();
@@ -341,40 +310,25 @@ ui.playBtn.addEventListener('click', () => {
   ambientStarted = false;
   somethingStarted = false;
 
-  // Always schedule a messages fallback so "nothing happens" can’t occur.
+  // Guaranteed message fallback so "nothing happens" can’t occur
   const msgFallback = setTimeout(() => {
     if (!messagesStarted){
-      console.log("Starting messages via fallback.");
       messagesStarted = true;
       nextMessage();
     }
-  }, 2000);
+  }, 2500);
 
-  // Panic timer: if neither ambient nor first message has started, re-show PLAY.
+  // Panic timer: if neither ambient nor message started, re-show PLAY
   const panic = setTimeout(() => {
     if (!somethingStarted){
-      console.warn("No playback started in time. Showing PLAY again.");
       showPlay("TRY AGAIN");
     }
-  }, 8000);
+  }, 9000);
 
-  // Safe priming without allSettled
-  Promise.all([prime(ui.amb), prime(ui.msg)].map(p => p.catch(()=>{})))
-    .then(() => {
-      playNextAmbient();
-      // additional fallback in case ambient doesn't kick 'playing'
-      setTimeout(() => {
-        if (!messagesStarted){
-          console.log("Secondary messages fallback.");
-          messagesStarted = true;
-          nextMessage();
-        }
-      }, 6000);
-    })
-    .catch(() => {
-      // Even if priming throws, our fallbacks still handle starting messages.
-      console.warn("Priming threw unexpectedly; relying on fallbacks.");
-    });
+  // Prime + start ambient cleanly (load → canplay → play)
+  Promise.all([prime(ui.amb), prime(ui.msg)].map(p => p.catch(()=>{}))).then(()=>{
+    playNextAmbient();
+  });
 });
 </script>
 </body>
