@@ -7,13 +7,15 @@
 <meta name="color-scheme" content="dark light" />
 <style>
   :root{
-    /* single place to tweak overall opacity tint for both title & button */
+    /* Single knob for both title and button colour/opacity */
     --ui-alpha: 0.26;
+    --ui-color: rgba(255,255,255,var(--ui-alpha));
   }
+
   html, body { height: 100%; }
   body {
     margin: 0;
-    background: #000;
+    background: #000; /* page background (video sits above) */
     color: #fff;
     overflow: hidden; /* pure splash */
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -27,18 +29,17 @@
     object-fit: cover;
     z-index: 0;
     pointer-events: none;
-    background:#000;
     filter: saturate(0.9) contrast(1.05) blur(0.3px); /* subtle VHS-ish softness */
+    background:#000;
   }
 
-  /* Title near the top */
+  /* Title near the top, always single line and fully visible */
   .title-wrap{
     position: fixed;
-    top: clamp(16px, 8vh, 100px);
+    top: clamp(12px, 8vh, 96px);
     left: 50%;
     transform: translateX(-50%);
-    width: 92vw;           /* available width for fitting */
-    max-width: 1200px;
+    width: min(92vw, 1200px);
     z-index: 2;
     text-align: center;
     pointer-events: none;
@@ -47,40 +48,46 @@
   #title{
     margin: 0;
     text-transform: uppercase;
-    white-space: nowrap;    /* force one line */
-    letter-spacing: 0.18em; /* wide, but reasonable on phones */
+    white-space: nowrap;          /* one line only */
+    letter-spacing: 0.18em;       /* wide but reasonable on phones */
     font-weight: 700;
     line-height: 1.06;
-    color: rgba(255,255,255,var(--ui-alpha));
+    color: var(--ui-color);
     user-select: none;
-    /* initial size; JS will auto-fit down if needed */
-    font-size: 9vw;
-    /* prevents subpixel blur when we scale font-size repeatedly */
+
+    /* Start smaller; JS will shrink further to fit if needed */
+    font-size: 8vw;
     will-change: font-size;
   }
 
-  /* Center Play button (SVG with text knockout) */
+  /* Center Play button: outline box + matching text colour/opacity */
   .playbtn{
     position: fixed;
     left: 50%; top: 50%;
     transform: translate(-50%,-50%);
     z-index: 3;
 
-    border: none;
-    padding: 0;
-    background: transparent;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    padding: 14px 28px;
+    border-radius: 6px;
+    border: clamp(3px, 0.6vw, 6px) solid var(--ui-color); /* thick stroke */
+    background: transparent;       /* no fill */
+    color: var(--ui-color);        /* text matches title */
+    text-transform: uppercase;
+    font-weight: 800;
+    letter-spacing: 0.22em;
+    font-size: clamp(12px, 2.6vw, 18px);
+    line-height: 1;
     cursor: pointer;
 
-    /* improve click target on very small screens */
+    -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
   }
-  .playbtn:disabled{ opacity: 0.55; cursor: default; }
-
-  .playbtn svg{
-    display: block;
-    width: min(60vw, 320px);
-    height: auto;
-  }
+  .playbtn:disabled{ opacity: 0.6; cursor: default; }
+  .playbtn:focus-visible{ outline: none; box-shadow: 0 0 0 2px color-mix(in oklab, white 30%, transparent); }
 
   /* Motion/accessibility */
   @media (prefers-reduced-motion: reduce){
@@ -93,7 +100,7 @@
 
 <!-- Background video (muted+playsinline so it autoplays on mobile) -->
 <video id="bg-video" autoplay muted loop playsinline preload="metadata" aria-hidden="true">
-  <source src="media/Clouds.mp4?v=6" type="video/mp4">
+  <source src="media/Clouds.mp4?v=7" type="video/mp4">
 </video>
 
 <!-- Minimal title (auto-fitted via JS to one line) -->
@@ -101,30 +108,8 @@
   <h1 id="title">LISTENMACHINE</h1>
 </div>
 
-<!-- Center Play control: white pill with knockout "PLAY" -->
-<button id="play" class="playbtn" type="button" aria-label="Play">
-  <svg viewBox="0 0 320 56" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-    <defs>
-      <!-- Mask: white reveals, black cuts out text -->
-      <mask id="cutout">
-        <rect x="0" y="0" width="320" height="56" rx="28" fill="#fff"/>
-        <text x="50%" y="50%"
-              fill="#000"
-              font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
-              font-weight="800"
-              font-size="20"
-              text-anchor="middle"
-              dominant-baseline="middle"
-              letter-spacing="0.22em"
-              style="text-transform:uppercase">PLAY</text>
-      </mask>
-    </defs>
-    <!-- The pill uses the mask so the word becomes transparent -->
-    <rect x="0" y="0" width="320" height="56" rx="28"
-          fill="#fff" fill-opacity="var(--ui-alpha)"
-          mask="url(#cutout)"/>
-  </svg>
-</button>
+<!-- Center Play control: outline box + matching text -->
+<button id="play" class="playbtn" type="button" aria-label="Play">PLAY</button>
 
 <!-- Hidden audio elements -->
 <audio id="amb" preload="auto" playsinline></audio>
@@ -135,25 +120,23 @@
 (function(){
   const title = document.getElementById('title');
   function fit(){
-    // available width inside the title container
     const container = title.parentElement;
     const maxWidth = container.clientWidth;
-    // start with a size relative to viewport
-    let size = Math.min(window.innerWidth * 0.09, window.innerHeight * 0.18, 120); // px cap
+
+    // Start size relative to viewport; capped to stay sane
+    let size = Math.min(window.innerWidth * 0.08, window.innerHeight * 0.18, 110); // px
     title.style.fontSize = size + 'px';
 
-    // shrink until it fits on one line within container width
-    let safety = 60;
-    // Measure using scrollWidth vs container width (1.5px buffer for rounding)
+    // Shrink until the single-line title fits container width
+    let safety = 80;
     while (title.scrollWidth > (maxWidth - 1.5) && safety-- > 0){
-      size *= 0.96;
+      size *= 0.965;
       title.style.fontSize = size + 'px';
     }
   }
   window.addEventListener('resize', fit, {passive:true});
   window.addEventListener('orientationchange', fit, {passive:true});
   window.addEventListener('load', fit);
-  // in case fonts/render tick happens after load
   setTimeout(fit, 0);
 })();
 
@@ -182,7 +165,7 @@ const FILES = {
     "audio/messages/77.mp3","audio/messages/78.mp3"
   ],
   ambient: [
-    "audio/ambient/Aphex Twin - Stone In Focus 4.mp3"
+    "audio/ambient/Aphex Twin - Stone In Focus 4.mp3"  // chosen once per refresh
   ]
 };
 
