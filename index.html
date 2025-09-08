@@ -9,6 +9,11 @@
   :root{
     --ui-alpha: 0.26;
     --ui-color: rgba(255,255,255,var(--ui-alpha));
+
+    /* Title animation controls */
+    --title-blur: 0px;           /* start sharp */
+    --title-opacity: 1;          /* start visible */
+    --title-fade-ms: 60000ms;    /* 60s blur + fade */
   }
 
   html, body { height: 100%; }
@@ -31,7 +36,7 @@
     background:#000;
     filter: saturate(0.9) contrast(1.05) blur(0.3px);
     opacity: 0;
-    transition: opacity 30000ms linear; /* default; JS also syncs to BG.fadeMs */
+    transition: opacity 30000ms linear; /* JS also syncs to BG.fadeMs */
   }
   .bgvideo.show{ opacity: 1; }
 
@@ -57,7 +62,14 @@
     color: var(--ui-color);
     user-select: none;
     font-size: 8vw;               /* JS will shrink until it fits */
-    will-change: font-size;
+    will-change: font-size, filter, opacity;
+
+    /* New: long blur + fade, driven by CSS variables */
+    filter: blur(var(--title-blur));
+    opacity: var(--title-opacity);
+    transition:
+      filter var(--title-fade-ms) linear,
+      opacity var(--title-fade-ms) linear;
   }
 
   /* Center Play button */
@@ -160,8 +172,8 @@ if (!Promise.allSettled) {
 <script>
 /* ===================== BACKGROUND CROSSFADE (Clouds → Nightsky → Snow → Road → Forest → Clouds) ===================== */
 const BG = {
-  displayMs: 5000,  // time fully visible between fades
-  fadeMs: 60000      // crossfade duration
+  displayMs: 5000,   // time fully visible between fades (kept as you set)
+  fadeMs: 60000      // crossfade duration (kept as you set)
 };
 
 (function setupBackgroundLoop(){
@@ -340,6 +352,11 @@ function hidePlay(){ ui.playBtn.classList.add('hidden'); ui.playBtn.disabled = t
 
 ui.playBtn.addEventListener('click', () => {
   hidePlay();
+
+  /* Kick off the long title blur + fade (to 250px blur and 0 opacity over 60s) */
+  const root = document.documentElement;
+  root.style.setProperty('--title-blur', '250px');
+  root.style.setProperty('--title-opacity', '0');
 
   resetMsgDeck();
   resetAmbDeck();
