@@ -90,7 +90,10 @@
     justify-content: center;
 
     padding: 14px 32px;
-    border: clamp(3px, 0.6vw, 6px) solid var(--ui-color);
+    /* removed the rectangle */
+    border: none;
+    outline: none;
+
     background: transparent;
     color: var(--ui-color);
     text-transform: uppercase;
@@ -103,6 +106,7 @@
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
   }
+  .playbtn:focus{ outline: none; }
   .hidden{ display:none !important; }
 
   /* Reduced motion: keep videos visible; just remove the fade */
