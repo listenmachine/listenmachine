@@ -36,7 +36,7 @@
     background:#000;
     filter: saturate(0.9) contrast(1.05) blur(0.3px);
     opacity: 0;
-    transition: opacity 20000ms linear; /* JS also syncs to BG.fadeMs */
+    transition: opacity 20000ms linear; /* JS updates to BG.fadeMs too */
   }
   .bgvideo.show{ opacity: 1; }
 
@@ -178,8 +178,9 @@ if (!Promise.allSettled) {
 <script>
 /* ===================== BACKGROUND CROSSFADE (Clouds → Nightsky → Road → Forest → Snow → Clouds) ===================== */
 const BG = {
-  displayMs: 5000,   // time fully visible between fades (as you set)
-  fadeMs: 60000      // crossfade duration (as you set)
+  displayMs: 5000,   // time fully visible between fades (your setting)
+  fadeMs: 60000,     // crossfade duration (your setting)
+  firstHoldAfterClickMs: 10000 // ← hold on Clouds for 10s after PLAY
 };
 
 (function setupBackgroundLoop(){
@@ -198,13 +199,7 @@ const BG = {
     if (!document.hidden) vids.forEach(v => { try { v.play(); } catch(e){} });
   });
 
-  // Use PLAY click to unlock video on iOS/Safari if needed
-  const playBtn = document.getElementById('play');
-  if (playBtn) playBtn.addEventListener('click', () => {
-    vids.forEach(v => { try { v.play(); } catch(e){} });
-  }, { once: true });
-
-  let i = 0; // index of currently visible video
+  let i = 0; // index of currently visible video (starts on Clouds)
 
   function crossfade(){
     const cur = vids[i];
@@ -221,8 +216,19 @@ const BG = {
     setTimeout(crossfade, BG.displayMs + BG.fadeMs);
   }
 
-  // Kick everything off after the initial full display period
-  setTimeout(crossfade, BG.displayMs);
+  // IMPORTANT: do NOT start any cycle yet — hold on Clouds.
+  // We only begin the cycle after the user clicks PLAY, and then wait 10s.
+
+  const playBtn = document.getElementById('play');
+  if (playBtn) {
+    playBtn.addEventListener('click', () => {
+      // iOS/Safari paranoia: ensure videos are "allowed" to play after gesture
+      vids.forEach(v => { try { v.play(); } catch(e){} });
+
+      // Now hold on Clouds for 10s, then begin the first fade
+      setTimeout(crossfade, BG.firstHoldAfterClickMs);
+    }, { once: true });
+  }
 })();
 </script>
 
