@@ -102,12 +102,12 @@
 </video>
 <!-- B (Nightsky) -->
 <video id="bgB" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Nightsky.mp4?v=16"></video>
-<!-- C (Snow) -->
-<video id="bgC" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Snow.mp4?v=16"></video>
-<!-- D (Road) -->
-<video id="bgD" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Road1.mp4?v=16"></video>
-<!-- E (Forest) -->
-<video id="bgE" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Forest.mp4?v=16"></video>
+<!-- C (Road) -->
+<video id="bgC" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Road2.mp4?v=16"></video>
+<!-- D (Forest) -->
+<video id="bgD" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Forest.mp4?v=16"></video>
+<!-- E (Snow) -->
+<video id="bgE" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Snow2.mp4?v=16"></video>
 
 <!-- Title -->
 <div class="title-wrap">
@@ -160,7 +160,7 @@ if (!Promise.allSettled) {
 <script>
 /* ===================== BACKGROUND CROSSFADE (Clouds → Nightsky → Snow → Road → Forest → Clouds) ===================== */
 const BG = {
-  displayMs: 30000,  // time fully visible between fades
+  displayMs: 5000,  // time fully visible between fades
   fadeMs: 30000      // crossfade duration
 };
 
