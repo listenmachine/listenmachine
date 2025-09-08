@@ -353,9 +353,9 @@ function hidePlay(){ ui.playBtn.classList.add('hidden'); ui.playBtn.disabled = t
 ui.playBtn.addEventListener('click', () => {
   hidePlay();
 
-  /* Kick off the long title blur + fade (to 10px blur and 0 opacity over 60s) */
+  /* Kick off the long title blur + fade (to 30px blur and 0 opacity over 60s) */
   const root = document.documentElement;
-  root.style.setProperty('--title-blur', '10px');
+  root.style.setProperty('--title-blur', '30px');
   root.style.setProperty('--title-opacity', '0');
 
   resetMsgDeck();
