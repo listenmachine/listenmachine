@@ -100,11 +100,14 @@
 <video id="bgA" class="bgvideo show" muted loop playsinline autoplay preload="auto">
   <source src="media/Clouds2.mp4?v=16" type="video/mp4">
 </video>
-<!-- B (Nightsky) inserted after Clouds -->
+<!-- B (Nightsky) -->
 <video id="bgB" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Nightsky.mp4?v=16"></video>
-<!-- C (Road) and D (Forest) follow -->
-<video id="bgC" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Road1.mp4?v=16"></video>
-<video id="bgD" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Forest.mp4?v=16"></video>
+<!-- C (Snow) -->
+<video id="bgC" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Snow.mp4?v=16"></video>
+<!-- D (Road) -->
+<video id="bgD" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Road1.mp4?v=16"></video>
+<!-- E (Forest) -->
+<video id="bgE" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Forest.mp4?v=16"></video>
 
 <!-- Title -->
 <div class="title-wrap">
@@ -155,14 +158,14 @@ if (!Promise.allSettled) {
 </script>
 
 <script>
-/* ===================== BACKGROUND CROSSFADE (Clouds → Nightsky → Road → Forest → Clouds) ===================== */
+/* ===================== BACKGROUND CROSSFADE (Clouds → Nightsky → Snow → Road → Forest → Clouds) ===================== */
 const BG = {
   displayMs: 30000,  // time fully visible between fades
   fadeMs: 30000      // crossfade duration
 };
 
 (function setupBackgroundLoop(){
-  const vids = ['bgA','bgB','bgC','bgD'].map(id => document.getElementById(id));
+  const vids = ['bgA','bgB','bgC','bgD','bgE'].map(id => document.getElementById(id));
 
   // Keep CSS transition in sync with fadeMs and try to play all
   vids.forEach(v => {
