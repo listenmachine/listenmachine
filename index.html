@@ -51,6 +51,9 @@
     text-align: center;
     pointer-events: none;
     padding-inline: 2vw;
+
+    /* contain the blend so it doesn't affect other elements */
+    isolation: isolate;
   }
   #title{
     margin: 0;
@@ -64,7 +67,10 @@
     font-size: 8vw;               /* JS will shrink until it fits */
     will-change: font-size, filter, opacity;
 
-    /* New: long blur + fade, driven by CSS variables */
+    /* Blend like Photoshop "Overlay" */
+    mix-blend-mode: overlay;
+
+    /* Long blur + fade, driven by CSS variables */
     filter: blur(var(--title-blur));
     opacity: var(--title-opacity);
     transition:
@@ -108,17 +114,17 @@
 <body>
 
 <!-- Background videos -->
-<!-- A (Clouds) starts visible immediately so something shows even if JS fails -->
+<!-- A (Clouds4) starts visible immediately so something shows even if JS fails -->
 <video id="bgA" class="bgvideo show" muted loop playsinline autoplay preload="auto">
   <source src="media/Clouds4.mp4?v=16" type="video/mp4">
 </video>
 <!-- B (Nightsky) -->
 <video id="bgB" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Nightsky.mp4?v=16"></video>
-<!-- C (Road) -->
+<!-- C (Road2) -->
 <video id="bgC" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Road2.mp4?v=16"></video>
 <!-- D (Forest) -->
 <video id="bgD" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Forest.mp4?v=16"></video>
-<!-- E (Snow) -->
+<!-- E (Snow2) -->
 <video id="bgE" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Snow2.mp4?v=16"></video>
 
 <!-- Title -->
@@ -170,10 +176,10 @@ if (!Promise.allSettled) {
 </script>
 
 <script>
-/* ===================== BACKGROUND CROSSFADE (Clouds → Nightsky → Snow → Road → Forest → Clouds) ===================== */
+/* ===================== BACKGROUND CROSSFADE (Clouds → Nightsky → Road → Forest → Snow → Clouds) ===================== */
 const BG = {
-  displayMs: 15000,   // time fully visible between fades (kept as you set)
-  fadeMs: 60000      // crossfade duration (kept as you set)
+  displayMs: 5000,   // time fully visible between fades (as you set)
+  fadeMs: 60000      // crossfade duration (as you set)
 };
 
 (function setupBackgroundLoop(){
