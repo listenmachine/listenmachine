@@ -76,7 +76,6 @@
 
     padding: 14px 32px;
     border: clamp(3px, 0.6vw, 6px) solid var(--ui-color);
-    border-radius: 0;
     background: transparent;
     color: var(--ui-color);
     text-transform: uppercase;
@@ -91,9 +90,9 @@
   }
   .hidden{ display:none !important; }
 
+  /* Important: do NOT hide videos for reduced motion; just remove the fade */
   @media (prefers-reduced-motion: reduce){
-    .bgvideo{ display:none; }
-    body{ background:#000; }
+    .bgvideo{ transition: none; }
   }
 </style>
 </head>
@@ -101,12 +100,12 @@
 
 <!-- Background videos -->
 <!-- A (Clouds) starts visible immediately so something shows even if JS fails -->
-<video id="bgA" class="bgvideo show" muted loop playsinline preload="auto">
+<video id="bgA" class="bgvideo show" muted loop playsinline autoplay preload="auto">
   <source src="media/Clouds2.mp4?v=16" type="video/mp4">
 </video>
 <!-- B (Road) and C (Forest) are stacked underneath; JS handles crossfades -->
-<video id="bgB" class="bgvideo" muted loop playsinline preload="auto" src="media/Road2.mp4?v=16"></video>
-<video id="bgC" class="bgvideo" muted loop playsinline preload="auto" src="media/Forest.mp4?v=16"></video>
+<video id="bgB" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Road2.mp4?v=16"></video>
+<video id="bgC" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Forest.mp4?v=16"></video>
 
 <!-- Title -->
 <div class="title-wrap">
@@ -159,16 +158,15 @@ if (!Promise.allSettled) {
 <script>
 /* ===================== BACKGROUND CROSSFADE (Clouds → Road → Forest → Clouds) ===================== */
 const BG = {
-  displayMs: 20000,  // time fully visible between fades
-  fadeMs: 30000      // crossfade duration
+  displayMs: 10000,  // time fully visible between fades
+  fadeMs: 10000      // crossfade duration (must match CSS transition)
 };
 
 (function setupBackgroundLoop(){
   const A = document.getElementById('bgA'); // Clouds
   const B = document.getElementById('bgB'); // Road
   const C = document.getElementById('bgC'); // Forest
-
-  const vids = [A, B, C]; // order defines cycle: Clouds → Road → Forest → Clouds
+  const vids = [A, B, C]; // order defines cycle
 
   // Keep CSS transition in sync with fadeMs and try to play all
   vids.forEach(v => {
@@ -178,23 +176,67 @@ const BG = {
     else v.addEventListener('canplay', tryPlay, { once: true });
   });
 
-  let i = 0; // index of currently visible video in vids
-  let started = false;
+  // If a browser paused them while hidden, resume on visibility
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) vids.forEach(v => { try { v.play(); } catch(e){} });
+  });
+
+  // If you click PLAY for audio, also use that gesture to unlock video (iOS/Safari paranoia)
+  const playBtn = document.getElementById('play');
+  if (playBtn) playBtn.addEventListener('click', () => {
+    vids.forEach(v => { try { v.play(); } catch(e){} });
+  }, { once: true });
+
+  let i = 0; // index of currently visible video
 
   function crossfade(){
     const cur = vids[i];
     const next = vids[(i + 1) % vids.length];
 
-    try { next.currentTime = next.currentTime || 0; } catch {}
-    try { next.play(); } catch {}
+    // Make sure next is playing
+    try { if (next.readyState >= 2) next.play(); } catch(e){}
 
     next.classList.add('show');
     cur.classList.remove('show');
 
     i = (i + 1) % vids.length;
 
-    // After a fade completes, the new clip sits fully visible for displayMs
+    // Schedule next fade after visible + fade time
     setTimeout(crossfade, BG.displayMs + BG.fadeMs);
   }
 
-  function
+  // Kick everything off: ensure initial is visible, then schedule first fade
+  setTimeout(crossfade, BG.displayMs);
+})();
+</script>
+
+<script>
+/* ===================== AMBIENT AUDIO (starts on PLAY click) ===================== */
+(function setupAudio(){
+  const amb = document.getElementById('amb');
+  const playBtn = document.getElementById('play');
+
+  // Set your track here
+  const AMBIENT_SRC = 'audio/ambient/gnotee.mp3';
+
+  amb.src = AMBIENT_SRC;
+  amb.volume = 1.0;
+  amb.loop = false;   // you said the track doesn’t need to loop for now
+
+  function startAudio(){
+    amb.play().catch(()=>{ /* ignored: user may block; button remains if it fails */ });
+    playBtn.classList.add('hidden');
+  }
+
+  // Start audio on button click (required on iOS/modern Chrome)
+  playBtn.addEventListener('click', startAudio, { once: true });
+
+  // If tab comes back into view and audio got paused, try to resume
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && amb.paused) { amb.play().catch(()=>{}); }
+  });
+})();
+</script>
+
+</body>
+</html>
