@@ -100,9 +100,11 @@
 <video id="bgA" class="bgvideo show" muted loop playsinline autoplay preload="auto">
   <source src="media/Clouds2.mp4?v=16" type="video/mp4">
 </video>
-<!-- B (Road) and C (Forest) are stacked underneath; JS handles crossfades -->
-<video id="bgB" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Road2.mp4?v=16"></video>
-<video id="bgC" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Forest.mp4?v=16"></video>
+<!-- B (Nightsky) inserted after Clouds -->
+<video id="bgB" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Nightsky.mp4?v=16"></video>
+<!-- C (Road) and D (Forest) follow -->
+<video id="bgC" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Road1.mp4?v=16"></video>
+<video id="bgD" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Forest.mp4?v=16"></video>
 
 <!-- Title -->
 <div class="title-wrap">
@@ -153,14 +155,14 @@ if (!Promise.allSettled) {
 </script>
 
 <script>
-/* ===================== BACKGROUND CROSSFADE (Clouds → Road → Forest → Clouds) ===================== */
+/* ===================== BACKGROUND CROSSFADE (Clouds → Nightsky → Road → Forest → Clouds) ===================== */
 const BG = {
   displayMs: 30000,  // time fully visible between fades
   fadeMs: 30000      // crossfade duration
 };
 
 (function setupBackgroundLoop(){
-  const vids = ['bgA','bgB','bgC'].map(id => document.getElementById(id));
+  const vids = ['bgA','bgB','bgC','bgD'].map(id => document.getElementById(id));
 
   // Keep CSS transition in sync with fadeMs and try to play all
   vids.forEach(v => {
@@ -175,7 +177,7 @@ const BG = {
     if (!document.hidden) vids.forEach(v => { try { v.play(); } catch(e){} });
   });
 
-  // If you click PLAY for audio, also use that gesture to unlock video (iOS/Safari paranoia)
+  // Use PLAY click to unlock video on iOS/Safari if needed
   const playBtn = document.getElementById('play');
   if (playBtn) playBtn.addEventListener('click', () => {
     vids.forEach(v => { try { v.play(); } catch(e){} });
