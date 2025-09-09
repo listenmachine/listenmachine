@@ -258,7 +258,7 @@ const ui = { playBtn: $("#play"), amb: $("#amb"), msg: $("#msg") };
 
 ui.amb.loop = false;      // ambient advances through bucket (single track now, no loop)
 ui.amb.volume = 1.0;
-ui.msg.volume = 0.5;      // messages at half volume
+ui.msg.volume = 0.7;      // messages at half volume
 
 function shuffle(a){ const r=a.slice(); for(let i=r.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [r[i],r[j]]=[r[j],r[i]]; } return r; }
 let msgDeck = [];
