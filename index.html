@@ -243,34 +243,14 @@ const BG = {
 const MSG_DELAY_MS = 3000;
 
 /* Cache-bust the audio file if GH Pages is sticky */
-const AUDIO_V = 36;
+const AUDIO_V = 37;              /* ← bumped */
+const MAX_MSG = 118;             /* ← covers 1..118 */
 
 const FILES = {
   ambient: [
     "audio/ambient/gnotee.mp3?v=" + AUDIO_V
   ],
-  messages: [
-    "audio/messages/1.mp3","audio/messages/2.mp3","audio/messages/3.mp3","audio/messages/4.mp3",
-    "audio/messages/5.mp3","audio/messages/6.mp3","audio/messages/7.mp3","audio/messages/8.mp3",
-    "audio/messages/9.mp3","audio/messages/10.mp3","audio/messages/11.mp3","audio/messages/12.mp3",
-    "audio/messages/13.mp3","audio/messages/14.mp3","audio/messages/15.mp3","audio/messages/16.mp3",
-    "audio/messages/17.mp3","audio/messages/18.mp3","audio/messages/19.mp3","audio/messages/20.mp3",
-    "audio/messages/21.mp3","audio/messages/22.mp3","audio/messages/23.mp3","audio/messages/24.mp3",
-    "audio/messages/25.mp3","audio/messages/26.mp3","audio/messages/27.mp3","audio/messages/28.mp3",
-    "audio/messages/29.mp3","audio/messages/30.mp3","audio/messages/31.mp3","audio/messages/32.mp3",
-    "audio/messages/33.mp3","audio/messages/34.mp3","audio/messages/35.mp3","audio/messages/36.mp3",
-    "audio/messages/37.mp3","audio/messages/38.mp3","audio/messages/39.mp3","audio/messages/40.mp3",
-    "audio/messages/41.mp3","audio/messages/42.mp3","audio/messages/43.mp3","audio/messages/44.mp3",
-    "audio/messages/45.mp3","audio/messages/46.mp3","audio/messages/47.mp3","audio/messages/48.mp3",
-    "audio/messages/49.mp3","audio/messages/50.mp3","audio/messages/51.mp3","audio/messages/52.mp3",
-    "audio/messages/53.mp3","audio/messages/54.mp3","audio/messages/55.mp3","audio/messages/56.mp3",
-    "audio/messages/57.mp3","audio/messages/58.mp3","audio/messages/59.mp3","audio/messages/60.mp3",
-    "audio/messages/61.mp3","audio/messages/62.mp3","audio/messages/63.mp3","audio/messages/64.mp3",
-    "audio/messages/65.mp3","audio/messages/66.mp3","audio/messages/67.mp3","audio/messages/68.mp3",
-    "audio/messages/69.mp3","audio/messages/70.mp3","audio/messages/71.mp3","audio/messages/72.mp3",
-    "audio/messages/73.mp3","audio/messages/74.mp3","audio/messages/75.mp3","audio/messages/76.mp3",
-    "audio/messages/77.mp3","audio/messages/78.mp3"
-  ]
+  messages: Array.from({length: MAX_MSG}, (_, i) => "audio/messages/" + (i + 1) + ".mp3?v=" + AUDIO_V)
 };
 
 const $ = s => document.querySelector(s);
