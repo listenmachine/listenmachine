@@ -16,7 +16,7 @@
     --title-fade-ms: 20000ms;
 
     /* Global video look — lower contrast, lift shadows slightly */
-    --bg-filter: saturate(0.95) contrast(0.96) brightness(1.00) blur(0.00px);
+    --bg-filter: saturate(0.95) contrast(0.96) brightness(1.06) blur(0.25px);
   }
 
   html, body { height: 100%; }
@@ -37,7 +37,7 @@
     z-index: 0;
     pointer-events: none;
     background:#000;
-    filter: var(--bg-filter);       /* was hard-coded saturate/contrast/blur */
+    filter: var(--bg-filter);
     opacity: 0;
     transition: opacity 20000ms linear; /* JS updates to BG.fadeMs too */
   }
@@ -68,7 +68,7 @@
     font-size: 8vw;                /* JS will shrink until it fits */
     will-change: font-size, filter, opacity;
 
-    /* Blend like Photoshop "Soft Light" */
+    /* Soft Light blend for gentler UI */
     mix-blend-mode: soft-light;
 
     filter: blur(var(--title-blur));
@@ -102,7 +102,7 @@
     line-height: 1;
     cursor: pointer;
 
-    mix-blend-mode: overlay;    /* new */
+    mix-blend-mode: soft-light;    /* new */
     isolation: isolate;            /* keep blend scoped to the button */
 
     -webkit-tap-highlight-color: transparent;
@@ -228,10 +228,10 @@ const BG = {
 const MSG_DELAY_MS = 3000;
 
 /* Cache-bust audio if GH Pages is sticky */
-const AUDIO_V = 38;
+const AUDIO_V = 40;   /* bumped */
 
-/* Messages: 1..118 auto-built */
-const MAX_MSG = 118;
+/* Messages: 1..154 auto-built */
+const MAX_MSG = 154;
 
 /* Ambient: gnotee.mp3, gnotee2.mp3 … gnotee6.mp3 auto-built (no repeats) */
 const AMB_COUNT = 6;
