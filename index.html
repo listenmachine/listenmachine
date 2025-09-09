@@ -36,7 +36,7 @@
     background:#000;
     filter: saturate(0.9) contrast(1.05) blur(0.3px);
     opacity: 0;
-    transition: opacity 30000ms linear; /* JS updates to BG.fadeMs too */
+    transition: opacity 20000ms linear; /* JS updates to BG.fadeMs too */
   }
   .bgvideo.show{ opacity: 1; }
 
@@ -51,14 +51,12 @@
     text-align: center;
     pointer-events: none;
     padding-inline: 2vw;
-
-    /* contain the blend so it doesn't affect other elements */
     isolation: isolate;
   }
   #title{
     margin: 0;
     text-transform: uppercase;
-    white-space: nowrap;          /* force one line */
+    white-space: nowrap;
     letter-spacing: 0.18em;
     font-weight: 700;
     line-height: 1.06;
@@ -66,11 +64,7 @@
     user-select: none;
     font-size: 8vw;               /* JS will shrink until it fits */
     will-change: font-size, filter, opacity;
-
-    /* Blend like Photoshop "Overlay" */
     mix-blend-mode: overlay;
-
-    /* Long blur + fade, driven by CSS variables */
     filter: blur(var(--title-blur));
     opacity: var(--title-opacity);
     transition:
@@ -84,16 +78,12 @@
     left: 50%; top: 50%;
     transform: translate(-50%,-50%);
     z-index: 3;
-
     display: inline-flex;
     align-items: center;
     justify-content: center;
-
     padding: 14px 32px;
-    /* removed the rectangle */
     border: none;
     outline: none;
-
     background: transparent;
     color: var(--ui-color);
     text-transform: uppercase;
@@ -102,14 +92,12 @@
     font-size: clamp(12px, 2.6vw, 18px);
     line-height: 1;
     cursor: pointer;
-
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
   }
   .playbtn:focus{ outline: none; }
   .hidden{ display:none !important; }
 
-  /* Reduced motion: keep videos visible; just remove the fade */
   @media (prefers-reduced-motion: reduce){
     .bgvideo{ transition: none; }
   }
@@ -118,17 +106,12 @@
 <body>
 
 <!-- Background videos -->
-<!-- A (Clouds4) starts visible immediately so something shows even if JS fails -->
 <video id="bgA" class="bgvideo show" muted loop playsinline autoplay preload="auto">
   <source src="media/Clouds4.mp4?v=16" type="video/mp4">
 </video>
-<!-- B (Nightsky) -->
 <video id="bgB" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Nightsky.mp4?v=16"></video>
-<!-- C (Road2) -->
 <video id="bgC" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Road2.mp4?v=16"></video>
-<!-- D (Forest) -->
 <video id="bgD" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Forest.mp4?v=16"></video>
-<!-- E (Snow2) -->
 <video id="bgE" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Snow2.mp4?v=16"></video>
 
 <!-- Title -->
@@ -144,7 +127,7 @@
 <audio id="msg" preload="auto" playsinline></audio>
 
 <script>
-/* Minimal polyfill for Promise.allSettled (older Safari/Chromium variants) */
+/* Minimal polyfill for Promise.allSettled */
 if (!Promise.allSettled) {
   Promise.allSettled = function(promises){
     return Promise.all(promises.map(p => Promise.resolve(p)
@@ -156,16 +139,14 @@ if (!Promise.allSettled) {
 </script>
 
 <script>
-/* -------- Auto-fit title to ONE line (never clipped) -------- */
+/* -------- Auto-fit title to ONE line -------- */
 (function(){
   const title = document.getElementById('title');
   function fit(){
     const container = title.parentElement;
     const maxWidth = container.clientWidth;
-
-    let size = Math.min(window.innerWidth * 0.08, window.innerHeight * 0.18, 110); // px
+    let size = Math.min(window.innerWidth * 0.08, window.innerHeight * 0.18, 110);
     title.style.fontSize = size + 'px';
-
     let safety = 80;
     while (title.scrollWidth > (maxWidth - 1.5) && safety-- > 0){
       size *= 0.965;
@@ -180,56 +161,38 @@ if (!Promise.allSettled) {
 </script>
 
 <script>
-/* ===================== BACKGROUND CROSSFADE (Clouds → Nightsky → Road → Forest → Snow → Clouds) ===================== */
+/* ===== BACKGROUND CROSSFADE (Clouds → Nightsky → Road → Forest → Snow → Clouds) ===== */
 const BG = {
-  displayMs: 5000,   // time fully visible between fades (your setting)
-  fadeMs: 55000,     // crossfade duration (your setting)
-  firstHoldAfterClickMs: 10000 // ← hold on Clouds for 10s after PLAY
+  displayMs: 5000,
+  fadeMs: 55000,
+  firstHoldAfterClickMs: 10000
 };
 
 (function setupBackgroundLoop(){
   const vids = ['bgA','bgB','bgC','bgD','bgE'].map(id => document.getElementById(id));
-
-  // Keep CSS transition in sync with fadeMs and try to play all
   vids.forEach(v => {
     v.style.transitionDuration = BG.fadeMs + 'ms';
     const tryPlay = () => { try { v.play(); } catch(e){} };
     if (v.readyState >= 2) tryPlay();
     else v.addEventListener('canplay', tryPlay, { once: true });
   });
-
-  // Nudge videos when tab regains focus
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) vids.forEach(v => { try { v.play(); } catch(e){} });
   });
-
-  let i = 0; // index of currently visible video (starts on Clouds)
-
+  let i = 0;
   function crossfade(){
     const cur = vids[i];
     const next = vids[(i + 1) % vids.length];
-
     try { if (next.readyState >= 2) next.play(); } catch(e){}
-
     next.classList.add('show');
     cur.classList.remove('show');
-
     i = (i + 1) % vids.length;
-
-    // Schedule next fade after visible + fade time
     setTimeout(crossfade, BG.displayMs + BG.fadeMs);
   }
-
-  // IMPORTANT: do NOT start any cycle yet — hold on Clouds.
-  // We only begin the cycle after the user clicks PLAY, and then wait 10s.
-
   const playBtn = document.getElementById('play');
   if (playBtn) {
     playBtn.addEventListener('click', () => {
-      // iOS/Safari paranoia: ensure videos are "allowed" to play after gesture
       vids.forEach(v => { try { v.play(); } catch(e){} });
-
-      // Now hold on Clouds for 10s, then begin the first fade
       setTimeout(crossfade, BG.firstHoldAfterClickMs);
     }, { once: true });
   }
@@ -242,23 +205,30 @@ const BG = {
 /* Start messages this long after pressing Play (ms) */
 const MSG_DELAY_MS = 3000;
 
-/* Cache-bust the audio file if GH Pages is sticky */
-const AUDIO_V = 37;              /* ← bumped */
-const MAX_MSG = 118;             /* ← covers 1..118 */
+/* Cache-bust audio if GH Pages is sticky */
+const AUDIO_V = 38;
+
+/* Messages: 1..118 auto-built */
+const MAX_MSG = 118;
+
+/* Ambient: gnotee.mp3, gnotee2.mp3 … gnotee6.mp3 auto-built (no repeats) */
+const AMB_COUNT = 6;
 
 const FILES = {
-  ambient: [
-    "audio/ambient/gnotee.mp3?v=" + AUDIO_V
-  ],
-  messages: Array.from({length: MAX_MSG}, (_, i) => "audio/messages/" + (i + 1) + ".mp3?v=" + AUDIO_V)
+  ambient: Array.from({length: AMB_COUNT}, (_, i) =>
+    `audio/ambient/gnotee${i === 0 ? "" : (i + 1)}.mp3?v=${AUDIO_V}`
+  ),
+  messages: Array.from({length: MAX_MSG}, (_, i) =>
+    `audio/messages/${i + 1}.mp3?v=${AUDIO_V}`
+  )
 };
 
 const $ = s => document.querySelector(s);
 const ui = { playBtn: $("#play"), amb: $("#amb"), msg: $("#msg") };
 
-ui.amb.loop = false;      // ambient advances through bucket (single track now, no loop)
+ui.amb.loop = false;      // advance through shuffled ambient once, then stop
 ui.amb.volume = 1.0;
-ui.msg.volume = 0.8;      // messages at half volume
+ui.msg.volume = 0.5;      // messages at half volume
 
 function shuffle(a){ const r=a.slice(); for(let i=r.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [r[i],r[j]]=[r[j],r[i]]; } return r; }
 let msgDeck = [];
@@ -301,7 +271,7 @@ function nextMessage(){
   m.play().catch(()=>{});
 }
 
-/* Ambient bucket: keep playing through shuffled list */
+/* Ambient bucket: play each once in random order */
 function clearAmbHandlers(){ ui.amb.onended = ui.amb.onerror = ui.amb.oncanplay = ui.amb.onloadeddata = null; }
 function playNextAmbient(){
   clearAmbHandlers();
@@ -315,7 +285,6 @@ function playNextAmbient(){
   a.src = encodeURI(src);
   a.currentTime = 0;
 
-  // Load first, then play when ready (prevents silent reset)
   try { a.load(); } catch {}
 
   const tryPlay = () => { a.play().catch(() => { showPlay(); }); };
@@ -349,7 +318,7 @@ function hidePlay(){ ui.playBtn.classList.add('hidden'); ui.playBtn.disabled = t
 ui.playBtn.addEventListener('click', () => {
   hidePlay();
 
-  /* Kick off the long title blur + fade (to 30px blur and 0 opacity over 60s) */
+  /* Kick off the long title blur + fade */
   const root = document.documentElement;
   root.style.setProperty('--title-blur', '30px');
   root.style.setProperty('--title-opacity', '0');
@@ -365,7 +334,6 @@ ui.playBtn.addEventListener('click', () => {
     setTimeout(nextMessage, MSG_DELAY_MS);
   });
 
-  // Explicitly load the messages element
   try{ ui.msg.load(); }catch{}
 });
 </script>
