@@ -102,8 +102,8 @@
     line-height: 1;
     cursor: pointer;
 
-    mix-blend-mode: overlay;    /* new */
-    isolation: isolate;            /* keep blend scoped to the button */
+    mix-blend-mode: overlay;
+    isolation: isolate;
 
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
@@ -221,25 +221,20 @@ const BG = {
 })();
 </script>
 
+<!-- ===================== AUDIO: AMBIENT + MESSAGES (updated) ===================== -->
 <script>
-/* ===================== AUDIO: AMBIENT + MESSAGES ===================== */
-
 /* Start messages this long after pressing Play (ms) */
 const MSG_DELAY_MS = 3000;
 
 /* Cache-bust audio if GH Pages is sticky */
-const AUDIO_V = 40;   /* bumped */
+const AUDIO_V = 40;
 
-/* Messages: 1..154 auto-built */
+/* Messages: 1..154 */
 const MAX_MSG = 154;
 
-/* Ambient: gnotee.mp3, gnotee2.mp3 … gnotee6.mp3 auto-built (no repeats) */
-const AMB_COUNT = 6;
-
+/* We’ll fill ambient from GitHub at runtime */
 const FILES = {
-  ambient: Array.from({length: AMB_COUNT}, (_, i) =>
-    `audio/ambient/gnotee${i === 0 ? "" : (i + 1)}.mp3?v=${AUDIO_V}`
-  ),
+  ambient: [],
   messages: Array.from({length: MAX_MSG}, (_, i) =>
     `audio/messages/${i + 1}.mp3?v=${AUDIO_V}`
   )
@@ -250,9 +245,41 @@ const ui = { playBtn: $("#play"), amb: $("#amb"), msg: $("#msg") };
 
 ui.amb.loop = false;      // advance through shuffled ambient once, then stop
 ui.amb.volume = 1.0;
-ui.msg.volume = 0.8;      // messages at half volume
+ui.msg.volume = 0.8;      // messages a bit lower
 
-function shuffle(a){ const r=a.slice(); for(let i=r.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [r[i],r[j]]=[r[j],r[i]]; } return r; }
+/* --- Load the ambient list from your repo (public GitHub API) --- */
+const GH = { owner: "listenmachine", repo: "listenmachine", path: "audio/ambient" };
+let ambientListPromise = null;
+
+function loadAmbientList(){
+  if (ambientListPromise) return ambientListPromise;
+  const url = `https://api.github.com/repos/${GH.owner}/${GH.repo}/contents/${GH.path}`;
+  ambientListPromise = fetch(url, { headers: { "Accept": "application/vnd.github+json" } })
+    .then(r => {
+      if (!r.ok) throw new Error("Ambient list fetch failed: " + r.status);
+      return r.json();
+    })
+    .then(items => {
+      const list = (Array.isArray(items) ? items : [])
+        .filter(it => it.type === "file" && /\.mp3$/i.test(it.name))
+        .map(it => `${it.download_url}?v=${AUDIO_V}`);
+      FILES.ambient = list;
+      return list;
+    })
+    .catch(err => { console.error(err); FILES.ambient = []; return []; });
+  return ambientListPromise;
+}
+
+/* --- helpers --- */
+function shuffle(a){
+  const r = a.slice();
+  for (let i=r.length-1; i>0; i--){
+    const j = Math.floor(Math.random()*(i+1));
+    [r[i], r[j]] = [r[j], r[i]];
+  }
+  return r;
+}
+
 let msgDeck = [];
 let ambDeck = [];
 
@@ -345,13 +372,14 @@ ui.playBtn.addEventListener('click', () => {
   root.style.setProperty('--title-blur', '30px');
   root.style.setProperty('--title-opacity', '0');
 
+  // Load ambient list, then start ambient once we have it
+  loadAmbientList().then(() => {
+    resetAmbDeck();
+    playNextAmbient();
+  });
+
+  // Prep and start messages
   resetMsgDeck();
-  resetAmbDeck();
-
-  // Start ambient immediately within the user gesture
-  playNextAmbient();
-
-  // Prime messages so they can start cleanly later
   Promise.allSettled([prime(ui.msg)]).finally(() => {
     setTimeout(nextMessage, MSG_DELAY_MS);
   });
