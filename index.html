@@ -5,14 +5,19 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>ListenMachine</title>
 <meta name="color-scheme" content="dark light" />
+
+<!-- Preconnects to speed up GitHub API/raw fetches for ambient list -->
+<link rel="preconnect" href="https://raw.githubusercontent.com" crossorigin>
+<link rel="preconnect" href="https://api.github.com" crossorigin>
+
 <style>
   :root{
     --ui-alpha: 0.26;
     --ui-color: rgba(255,255,255,var(--ui-alpha));
 
     /* Title animation controls */
-    --title-blur: 0px;           /* start sharp */
-    --title-opacity: 1;          /* start visible */
+    --title-blur: 0px;
+    --title-opacity: 1;
     --title-fade-ms: 20000ms;
 
     /* Global video look — lower contrast, lift shadows slightly */
@@ -54,12 +59,12 @@
     text-align: center;
     pointer-events: none;
     padding-inline: 2vw;
-    isolation: isolate;            /* confine blend to the title group */
+    isolation: isolate;
   }
   #title{
     margin: 0;
     text-transform: uppercase;
-    white-space: nowrap;           /* force one line */
+    white-space: nowrap;
     letter-spacing: 0.18em;
     font-weight: 700;
     line-height: 1.06;
@@ -67,10 +72,7 @@
     user-select: none;
     font-size: 8vw;                /* JS will shrink until it fits */
     will-change: font-size, filter, opacity;
-
-    /* Soft Light blend for gentler UI */
     mix-blend-mode: soft-light;
-
     filter: blur(var(--title-blur));
     opacity: var(--title-opacity);
     transition:
@@ -119,7 +121,6 @@
   /* EXTRA SOFTENING ON TOUCH/MOBILE */
   @media (pointer: coarse), (max-width: 820px){
     :root{
-      /* slightly more lift + slightly less contrast for phones/tablets */
       --bg-filter: saturate(0.98) contrast(0.94) brightness(1.08) blur(0.2px);
     }
   }
@@ -221,7 +222,7 @@ const BG = {
 })();
 </script>
 
-<!-- ===================== AUDIO: AMBIENT + MESSAGES (updated) ===================== -->
+<!-- ===================== AUDIO: AMBIENT + MESSAGES (hardened) ===================== -->
 <script>
 /* Start messages this long after pressing Play (ms) */
 const MSG_DELAY_MS = 3000;
@@ -280,48 +281,26 @@ function shuffle(a){
   return r;
 }
 
+/* Hardened play() that detects gesture blocks and re-shows Play */
+function ensurePlaying(el, onBlocked){
+  const p = el.play();
+  if (p && typeof p.then === 'function'){
+    p.catch(() => { if (onBlocked) onBlocked(); });
+  }
+}
+
 let msgDeck = [];
 let ambDeck = [];
 
 function resetMsgDeck(){ msgDeck = shuffle(FILES.messages); }
 function resetAmbDeck(){ ambDeck = shuffle(FILES.ambient); }
 
-/* Messages with watchdogs (skip stalls) */
-function clearMsgHandlers(){
-  const m = ui.msg;
-  m.onended = m.onerror = m.onstalled = m.onsuspend = m.onwaiting =
-  m.onloadeddata = m.oncanplay = m.onplaying = m.ontimeupdate = null;
-}
-function nextMessage(){
-  if (!msgDeck.length) return;           // one pass per session, then stop
-  const src = msgDeck.shift();
-  clearMsgHandlers();
-
-  let started = false, startTimer=null, stallTimer=null, lastT=0;
-  function cleanup(){ if(startTimer) clearTimeout(startTimer); if(stallTimer) clearTimeout(stallTimer); }
-  function skip(){ cleanup(); nextMessage(); }
-
-  const m = ui.msg;
-  m.onended = () => { cleanup(); setTimeout(nextMessage, 0); };
-  m.onerror = () => { skip(); };
-  m.onstalled = m.onsuspend = m.onwaiting = () => {
-    if (stallTimer) clearTimeout(stallTimer);
-    stallTimer = setTimeout(skip, 8000);
-  };
-  m.onloadeddata = m.oncanplay = () => { m.play().catch(()=>{}); };
-  m.onplaying = () => { started = true; if(stallTimer){ clearTimeout(stallTimer); stallTimer=null; } if(startTimer){ clearTimeout(startTimer); startTimer=null; } };
-  m.ontimeupdate = () => {
-    if (m.currentTime > lastT + 0.25){ lastT = m.currentTime; if (stallTimer){ clearTimeout(stallTimer); stallTimer=null; } }
-  };
-
-  m.src = encodeURI(src);
-  try { m.load(); } catch {}
-  startTimer = setTimeout(() => { if(!started) skip(); }, 12000);
-  m.play().catch(()=>{});
+/* --------- Ambient: resilient to pauses/throttling ---------- */
+function clearAmbHandlers(){
+  const a = ui.amb;
+  a.onended = a.onerror = a.oncanplay = a.onloadeddata = a.onpause = null;
 }
 
-/* Ambient bucket: play each once in random order */
-function clearAmbHandlers(){ ui.amb.onended = ui.amb.onerror = ui.amb.oncanplay = ui.amb.onloadeddata = null; }
 function playNextAmbient(){
   clearAmbHandlers();
   if (!ambDeck.length) return; // bucket exhausted -> stay quiet
@@ -330,19 +309,68 @@ function playNextAmbient(){
 
   a.onended = () => { playNextAmbient(); };
   a.onerror = () => { console.warn("Ambient failed:", a.src); playNextAmbient(); };
+  a.onpause = () => { if (!a.ended && ambDeck.length) ensurePlaying(a, showPlay); };
 
   a.src = encodeURI(src);
   a.currentTime = 0;
 
   try { a.load(); } catch {}
 
-  const tryPlay = () => { a.play().catch(() => { showPlay(); }); };
-  if (a.readyState >= 2) {
-    tryPlay();
-  } else {
-    a.oncanplay = tryPlay;
-    a.onloadeddata = tryPlay;
-  }
+  const tryPlay = () => ensurePlaying(a, showPlay);
+  if (a.readyState >= 2) tryPlay();
+  else { a.oncanplay = tryPlay; a.onloadeddata = tryPlay; }
+}
+
+/* --------- Messages: softer stall detection + auto-resume ---------- */
+function clearMsgHandlers(){
+  const m = ui.msg;
+  m.onended = m.onerror = m.onstalled = m.onwaiting =
+  m.onloadeddata = m.oncanplay = m.onplaying = m.ontimeupdate = m.onpause = null;
+}
+
+function nextMessage(){
+  if (!msgDeck.length) return;           // one pass per session, then stop
+  const src = msgDeck.shift();
+  clearMsgHandlers();
+
+  const m = ui.msg;
+  let started = false, startTimer = null, stallTimer = null, lastT = 0;
+
+  function cleanup(){ if(startTimer) clearTimeout(startTimer); if(stallTimer) clearTimeout(stallTimer); }
+  function skip(){ cleanup(); nextMessage(); }
+
+  m.onended = () => { cleanup(); setTimeout(nextMessage, 0); };
+  m.onerror = () => { cleanup(); skip(); };
+
+  // Handle true stalls/waiting with a longer grace window on mobile.
+  // NOTE: We intentionally do NOT treat 'suspend' as an error.
+  m.onstalled = m.onwaiting = () => {
+    if (stallTimer) clearTimeout(stallTimer);
+    stallTimer = setTimeout(skip, 15000); // 15s grace
+  };
+
+  m.onloadeddata = m.oncanplay = () => { ensurePlaying(m, showPlay); };
+
+  m.onplaying = () => {
+    started = true;
+    if (stallTimer){ clearTimeout(stallTimer); stallTimer = null; }
+    if (startTimer){ clearTimeout(startTimer); startTimer = null; }
+  };
+
+  m.ontimeupdate = () => {
+    if (m.currentTime > lastT + 0.25){
+      lastT = m.currentTime;
+      if (stallTimer){ clearTimeout(stallTimer); stallTimer = null; }
+    }
+  };
+
+  // If the browser pauses us (interruption/low-power), attempt seamless resume
+  m.onpause = () => { if (!m.ended && msgDeck.length) ensurePlaying(m, showPlay); };
+
+  m.src = encodeURI(src);
+  try { m.load(); } catch {}
+  startTimer = setTimeout(() => { if(!started) skip(); }, 15000); // longer initial start window
+  ensurePlaying(m, showPlay);
 }
 
 /* Prime audio after user gesture (messages only) */
@@ -353,11 +381,17 @@ function prime(el){
   }).catch(()=>{ el.muted = false; });
 }
 
-/* Resume nudge when returning to foreground */
+/* Resume nudges on lifecycle changes */
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden && ui.msg.paused && msgDeck.length){
-    nextMessage();
+  if (!document.hidden){
+    if (ambDeck.length) ensurePlaying(ui.amb, showPlay);
+    if (msgDeck.length) ensurePlaying(ui.msg, showPlay);
   }
+}, {passive:true});
+
+window.addEventListener('pageshow', () => {
+  if (ambDeck.length) ensurePlaying(ui.amb, showPlay);
+  if (msgDeck.length) ensurePlaying(ui.msg, showPlay);
 }, {passive:true});
 
 /* Play button: hide on press; re-show ONLY on playback error */
@@ -386,6 +420,14 @@ ui.playBtn.addEventListener('click', () => {
 
   try{ ui.msg.load(); }catch{}
 });
+
+/* Lightweight watchdog to nudge playback while visible */
+setInterval(() => {
+  if (document.hidden) return;
+  const a = ui.amb, m = ui.msg;
+  if (ambDeck.length && (a.paused || a.readyState < 2)) ensurePlaying(a, showPlay);
+  if (msgDeck.length && (m.paused || m.readyState < 2)) ensurePlaying(m, showPlay);
+}, 15000);
 </script>
 </body>
 </html>
