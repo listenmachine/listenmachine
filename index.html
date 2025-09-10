@@ -222,10 +222,14 @@ const BG = {
 })();
 </script>
 
-<!-- ===================== AUDIO: AMBIENT + MESSAGES (hardened) ===================== -->
+<!-- ===================== AUDIO: AMBIENT + MESSAGES (hardened, 5s stall) ===================== -->
 <script>
-/* Start messages this long after pressing Play (ms) */
-const MSG_DELAY_MS = 3000;
+/* Tunables */
+const MSG_DELAY_MS = 3000;   // start messages after Play
+const MSG_STALL_MS = 5000;   // wait 5s on stall/waiting before skipping to next message
+const MSG_START_MS = 5000;   // give 5s for a message to start playing
+const WATCHDOG_MS  = 5000;   // nudge audio every 5s while visible
+const AMB_GAP_MS   = 3000;   // consider ambient "stuck" if no progress for 3s
 
 /* Cache-bust audio if GH Pages is sticky */
 const AUDIO_V = 40;
@@ -298,7 +302,8 @@ function resetAmbDeck(){ ambDeck = shuffle(FILES.ambient); }
 /* --------- Ambient: resilient to pauses/throttling ---------- */
 function clearAmbHandlers(){
   const a = ui.amb;
-  a.onended = a.onerror = a.oncanplay = a.onloadeddata = a.onpause = null;
+  a.onended = a.onerror = a.oncanplay = a.onloadeddata =
+  a.onpause = a.onstalled = a.onwaiting = a.ontimeupdate = a.onabort = a.onemptied = null;
 }
 
 function playNextAmbient(){
@@ -307,9 +312,31 @@ function playNextAmbient(){
   const src = ambDeck.shift();
   const a = ui.amb;
 
+  let lastAmbT = 0, gapTimer = null;
+
   a.onended = () => { playNextAmbient(); };
   a.onerror = () => { console.warn("Ambient failed:", a.src); playNextAmbient(); };
   a.onpause = () => { if (!a.ended && ambDeck.length) ensurePlaying(a, showPlay); };
+  a.onstalled = a.onwaiting = () => { ensurePlaying(a, showPlay); };
+  a.onabort = a.onemptied = () => { try { a.load(); } catch{} ensurePlaying(a, showPlay); };
+
+  a.ontimeupdate = () => {
+    if (a.currentTime > lastAmbT + 0.25){
+      lastAmbT = a.currentTime;
+      if (gapTimer){ clearTimeout(gapTimer); gapTimer = null; }
+    } else {
+      if (!gapTimer){
+        gapTimer = setTimeout(() => {
+          if (!a.paused && !a.ended){
+            // try a soft kick; if still stuck, reload
+            ensurePlaying(a, showPlay);
+            try { a.load(); } catch{}
+            ensurePlaying(a, showPlay);
+          }
+        }, AMB_GAP_MS);
+      }
+    }
+  };
 
   a.src = encodeURI(src);
   a.currentTime = 0;
@@ -321,11 +348,12 @@ function playNextAmbient(){
   else { a.oncanplay = tryPlay; a.onloadeddata = tryPlay; }
 }
 
-/* --------- Messages: softer stall detection + auto-resume ---------- */
+/* --------- Messages: softer stall detection + auto-resume (5s) ---------- */
 function clearMsgHandlers(){
   const m = ui.msg;
   m.onended = m.onerror = m.onstalled = m.onwaiting =
-  m.onloadeddata = m.oncanplay = m.onplaying = m.ontimeupdate = m.onpause = null;
+  m.onloadeddata = m.oncanplay = m.onplaying = m.ontimeupdate =
+  m.onpause = m.onabort = m.onemptied = null;
 }
 
 function nextMessage(){
@@ -342,11 +370,11 @@ function nextMessage(){
   m.onended = () => { cleanup(); setTimeout(nextMessage, 0); };
   m.onerror = () => { cleanup(); skip(); };
 
-  // Handle true stalls/waiting with a longer grace window on mobile.
+  // Handle true stalls/waiting with a shorter 5s grace
   // NOTE: We intentionally do NOT treat 'suspend' as an error.
   m.onstalled = m.onwaiting = () => {
     if (stallTimer) clearTimeout(stallTimer);
-    stallTimer = setTimeout(skip, 15000); // 15s grace
+    stallTimer = setTimeout(skip, MSG_STALL_MS);
   };
 
   m.onloadeddata = m.oncanplay = () => { ensurePlaying(m, showPlay); };
@@ -366,10 +394,11 @@ function nextMessage(){
 
   // If the browser pauses us (interruption/low-power), attempt seamless resume
   m.onpause = () => { if (!m.ended && msgDeck.length) ensurePlaying(m, showPlay); };
+  m.onabort = m.onemptied = () => { try { m.load(); } catch{} ensurePlaying(m, showPlay); };
 
   m.src = encodeURI(src);
   try { m.load(); } catch {}
-  startTimer = setTimeout(() => { if(!started) skip(); }, 15000); // longer initial start window
+  startTimer = setTimeout(() => { if(!started) skip(); }, MSG_START_MS);
   ensurePlaying(m, showPlay);
 }
 
@@ -390,6 +419,11 @@ document.addEventListener('visibilitychange', () => {
 }, {passive:true});
 
 window.addEventListener('pageshow', () => {
+  if (ambDeck.length) ensurePlaying(ui.amb, showPlay);
+  if (msgDeck.length) ensurePlaying(ui.msg, showPlay);
+}, {passive:true});
+
+window.addEventListener('focus', () => {
   if (ambDeck.length) ensurePlaying(ui.amb, showPlay);
   if (msgDeck.length) ensurePlaying(ui.msg, showPlay);
 }, {passive:true});
@@ -421,13 +455,13 @@ ui.playBtn.addEventListener('click', () => {
   try{ ui.msg.load(); }catch{}
 });
 
-/* Lightweight watchdog to nudge playback while visible */
+/* Lightweight watchdog to nudge playback while visible (every 5s) */
 setInterval(() => {
   if (document.hidden) return;
   const a = ui.amb, m = ui.msg;
   if (ambDeck.length && (a.paused || a.readyState < 2)) ensurePlaying(a, showPlay);
   if (msgDeck.length && (m.paused || m.readyState < 2)) ensurePlaying(m, showPlay);
-}, 15000);
+}, WATCHDOG_MS);
 </script>
 </body>
 </html>
