@@ -6,18 +6,22 @@
 <title>ListenMachine</title>
 <meta name="color-scheme" content="dark light" />
 
-<!-- Preconnects to speed up GitHub API/raw fetches for ambient list -->
-<link rel="preconnect" href="https://raw.githubusercontent.com" crossorigin>
+<!-- Preconnects for faster ambient list + raw audio fetch -->
 <link rel="preconnect" href="https://api.github.com" crossorigin>
+<link rel="preconnect" href="https://raw.githubusercontent.com" crossorigin>
 
 <style>
   :root{
     --ui-alpha: 0.26;
     --ui-color: rgba(255,255,255,var(--ui-alpha));
+
+    /* Title animation controls */
     --title-blur: 0px;
     --title-opacity: 1;
     --title-fade-ms: 20000ms;
-    --bg-filter: saturate(0.95) contrast(0.96) brightness(1.06) blur(0.00px);
+
+    /* Global video look */
+    --bg-filter: saturate(0.95) contrast(0.96) brightness(1.06) blur(0px);
   }
 
   html, body { height: 100%; }
@@ -29,6 +33,7 @@
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
 
+  /* Background videos with crossfade */
   .bgvideo{
     position: fixed;
     inset: 0;
@@ -64,14 +69,12 @@
     line-height: 1.06;
     color: var(--ui-color);
     user-select: none;
-    font-size: 8vw;
+    font-size: 8vw; /* auto-shrinks via JS */
     will-change: font-size, filter, opacity;
     mix-blend-mode: soft-light;
     filter: blur(var(--title-blur));
     opacity: var(--title-opacity);
-    transition:
-      filter var(--title-fade-ms) linear,
-      opacity var(--title-fade-ms) linear;
+    transition: filter var(--title-fade-ms) linear, opacity var(--title-fade-ms) linear;
   }
 
   .playbtn{
@@ -104,7 +107,6 @@
   @media (prefers-reduced-motion: reduce){
     .bgvideo{ transition: none; }
   }
-
   @media (pointer: coarse), (max-width: 820px){
     :root{ --bg-filter: saturate(0.98) contrast(0.94) brightness(1.08) blur(0.2px); }
   }
@@ -126,24 +128,8 @@
   <h1 id="title">LISTENMACHINE</h1>
 </div>
 
-<!-- Center Play button -->
+<!-- Play -->
 <button id="play" class="playbtn" type="button" aria-label="Play">PLAY</button>
-
-<!-- Hidden audio elements -->
-<audio id="amb" preload="auto" playsinline crossorigin="anonymous"></audio>
-<audio id="msg" preload="auto" playsinline crossorigin="anonymous"></audio>
-
-<script>
-/* Minimal polyfill for Promise.allSettled */
-if (!Promise.allSettled) {
-  Promise.allSettled = function(promises){
-    return Promise.all(promises.map(p => Promise.resolve(p)
-      .then(value => ({status: "fulfilled", value}))
-      .catch(reason => ({status: "rejected", reason}))
-    ));
-  };
-}
-</script>
 
 <script>
 /* -------- Auto-fit title to ONE line -------- */
@@ -169,11 +155,7 @@ if (!Promise.allSettled) {
 
 <script>
 /* ===== BACKGROUND CROSSFADE (Clouds → Nightsky → Road → Forest → Snow → Clouds) ===== */
-const BG = {
-  displayMs: 5000,
-  fadeMs: 55000,
-  firstHoldAfterClickMs: 10000
-};
+const BG = { displayMs: 5000, fadeMs: 55000, firstHoldAfterClickMs: 10000 };
 
 (function setupBackgroundLoop(){
   const vids = ['bgA','bgB','bgC','bgD','bgE'].map(id => document.getElementById(id));
@@ -206,183 +188,182 @@ const BG = {
 })();
 </script>
 
-<!-- ===================== AUDIO: AMBIENT + MESSAGES (primed both, 5s stall) ===================== -->
+<!-- ===================== AUDIO (single Web Audio pipeline) ===================== -->
 <script>
 /* Tunables */
-const MSG_DELAY_MS = 3000;
-const MSG_STALL_MS = 5000;
-const MSG_START_MS = 5000;
-const WATCHDOG_MS  = 5000;
-const AMB_GAP_MS   = 3000;
+const MSG_DELAY_MS = 3000;     // start messages after tap
+const MSG_FETCH_MS = 5000;     // message fetch/decode timeout
+const AMB_FETCH_MS = 8000;     // ambient fetch/decode timeout
+const WATCHDOG_MS  = 5000;     // resume checks
+const AUDIO_V      = 41;       // bump when replacing files (cache-bust)
+const MAX_MSG      = 154;      // number of message files
 
-/* Cache-bust audio if GH Pages is sticky */
-const AUDIO_V = 40;
-
-/* Messages: 1..154 */
-const MAX_MSG = 154;
-
-/* We’ll fill ambient from GitHub at runtime */
-const FILES = {
-  ambient: [],
-  messages: Array.from({length: MAX_MSG}, (_, i) =>
-    `audio/messages/${i + 1}.mp3?v=${AUDIO_V}`
-  )
-};
-
-const $ = s => document.querySelector(s);
-const ui = { playBtn: $("#play"), amb: $("#amb"), msg: $("#msg") };
-
-ui.amb.loop = false;
-ui.amb.volume = 1.0;
-ui.msg.volume = 0.8;
-
-/* --- Load the ambient list from your repo (public GitHub API) --- */
+/* Sources */
 const GH = { owner: "listenmachine", repo: "listenmachine", path: "audio/ambient" };
-let ambientListPromise = null;
+const API_URL = `https://api.github.com/repos/${GH.owner}/${GH.repo}/contents/${GH.path}`;
 
-function loadAmbientList(){
-  if (ambientListPromise) return ambientListPromise;
-  const url = `https://api.github.com/repos/${GH.owner}/${GH.repo}/contents/${GH.path}`;
-  ambientListPromise = fetch(url, { headers: { "Accept": "application/vnd.github+json" } })
-    .then(r => {
-      if (!r.ok) throw new Error("Ambient list fetch failed: " + r.status);
-      return r.json();
-    })
-    .then(items => {
-      const list = (Array.isArray(items) ? items : [])
-        .filter(it => it.type === "file" && /\.mp3$/i.test(it.name))
-        .map(it => `${it.download_url}?v=${AUDIO_V}`);
-      FILES.ambient = list;
-      return list;
-    })
-    .catch(err => { console.error(err); FILES.ambient = []; return []; });
-  return ambientListPromise;
+/* Build message list: 1..MAX_MSG */
+const messages = Array.from({length: MAX_MSG}, (_, i) => `audio/messages/${i+1}.mp3?v=${AUDIO_V}`);
+
+/* Ambient list is fetched at runtime from GitHub API (download_url -> raw.githubusercontent.com) */
+let ambient = [];
+
+/* Utils */
+const $ = s => document.querySelector(s);
+const playBtn = $('#play');
+function showPlay(){ playBtn.classList.remove('hidden'); playBtn.disabled = false; }
+function hidePlay(){ playBtn.classList.add('hidden'); playBtn.disabled = true; }
+function shuffle(a){ const r=a.slice(); for(let i=r.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1)); [r[i],r[j]]=[r[j],r[i]];} return r; }
+
+/* Web Audio setup (created on first tap) */
+let ctx = null, masterGain = null, ambGain = null, msgGain = null;
+
+/* Decks (no repeats per refresh) */
+let msgDeck = [], ambDeck = [];
+
+/* Current nodes for cleanup if needed */
+let ambNode = null, msgNode = null;
+
+/* Fetch+decode with timeout */
+async function fetchDecode(url, timeoutMs){
+  const u = (url.includes('?') ? url + '&' : url + '?') + 'v=' + AUDIO_V;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try{
+    const res = await fetch(u, {mode:'cors', cache:'force-cache', signal: ctrl.signal});
+    if (!res.ok) throw new Error('HTTP '+res.status);
+    const ab = await res.arrayBuffer();
+    return await new Promise((resolve, reject) => {
+      ctx.decodeAudioData(ab, resolve, reject);
+    });
+  } finally { clearTimeout(t); }
 }
 
-function shuffle(a){
-  const r = a.slice();
-  for (let i=r.length-1; i>0; i--){
-    const j = Math.floor(Math.random()*(i+1));
-    [r[i], r[j]] = [r[j], r[i]];
+/* Ambient: play each once in random order */
+async function playNextAmbient(){
+  if (!ctx || ctx.state !== 'running') return;
+  if (!ambDeck.length) return; // done for this session
+
+  const url = ambDeck.shift();
+  try{
+    const buf = await fetchDecode(url, AMB_FETCH_MS);
+    if (!ctx || ctx.state !== 'running') return;
+    ambNode = ctx.createBufferSource();
+    ambNode.buffer = buf;
+    ambNode.connect(ambGain);
+    ambNode.onended = () => { ambNode = null; playNextAmbient(); };
+    ambNode.start(0);
+  } catch(e){
+    // Skip on error/timeouts
+    playNextAmbient();
   }
-  return r;
 }
 
-/* Hardened play() that detects gesture blocks and re-shows Play */
-function ensurePlaying(el, onBlocked){
-  const p = el.play();
-  if (p && typeof p.then === 'function'){
-    p.catch(() => { if (onBlocked) onBlocked(); });
-  }
-}
-
-let msgDeck = [];
-let ambDeck = [];
-function resetMsgDeck(){ msgDeck = shuffle(FILES.messages); }
-function resetAmbDeck(){ ambDeck = shuffle(FILES.ambient); }
-
-/* --------- Ambient: resilient to pauses/throttling ---------- */
-function clearAmbHandlers(){
-  const a = ui.amb;
-  a.onended = a.onerror = a.oncanplay = a.onloadeddata =
-  a.onpause = a.onstalled = a.onwaiting = a.ontimeupdate = a.onabort = a.onemptied = null;
-}
-
-function playNextAmbient(){
-  clearAmbHandlers();
-  if (!ambDeck.length) return;
-  const src = ambDeck.shift();
-  const a = ui.amb;
-
-  let lastAmbT = 0, gapTimer = null;
-
-  a.onended = () => { playNextAmbient(); };
-  a.onerror = () => { console.warn("Ambient failed:", a.src); playNextAmbient(); };
-  a.onpause = () => { if (!a.ended && ambDeck.length) ensurePlaying(a, showPlay); };
-  a.onstalled = a.onwaiting = () => { ensurePlaying(a, showPlay); };
-  a.onabort = a.onemptied = () => { try { a.load(); } catch{} ensurePlaying(a, showPlay); };
-
-  a.ontimeupdate = () => {
-    if (a.currentTime > lastAmbT + 0.25){
-      lastAmbT = a.currentTime;
-      if (gapTimer){ clearTimeout(gapTimer); gapTimer = null; }
-    } else if (!gapTimer){
-      gapTimer = setTimeout(() => {
-        if (!a.paused && !a.ended){
-          ensurePlaying(a, showPlay);
-          try { a.load(); } catch{}
-          ensurePlaying(a, showPlay);
-        }
-      }, AMB_GAP_MS);
-    }
-  };
-
-  a.src = encodeURI(src);
-  a.currentTime = 0;
-  try { a.load(); } catch {}
-
-  const tryPlay = () => ensurePlaying(a, showPlay);
-  if (a.readyState >= 2) tryPlay(); else { a.oncanplay = tryPlay; a.onloadeddata = tryPlay; }
-}
-
-/* --------- Messages: softer stall detection + auto-resume (5s) ---------- */
-function clearMsgHandlers(){
-  const m = ui.msg;
-  m.onended = m.onerror = m.onstalled = m.onwaiting =
-  m.onloadeddata = m.oncanplay = m.onplaying = m.ontimeupdate =
-  m.onpause = m.onabort = m.onemptied = null;
-}
-
-function nextMessage(){
+/* Messages: sequential playback, skip after 5s fetch/decode failure */
+async function playNextMessage(){
+  if (!ctx || ctx.state !== 'running') return;
   if (!msgDeck.length) return;
-  const src = msgDeck.shift();
-  clearMsgHandlers();
 
-  const m = ui.msg;
-  let started = false, startTimer = null, stallTimer = null, lastT = 0;
+  const url = msgDeck.shift();
+  try{
+    const buf = await fetchDecode(url, MSG_FETCH_MS);
+    if (!ctx || ctx.state !== 'running') return;
+    msgNode = ctx.createBufferSource();
+    msgNode.buffer = buf;
+    msgNode.connect(msgGain);
+    msgNode.onended = () => { msgNode = null; playNextMessage(); };
+    msgNode.start(0);
+  } catch(e){
+    // Skip quickly on error/timeouts
+    playNextMessage();
+  }
+}
 
-  function cleanup(){ if(startTimer) clearTimeout(startTimer); if(stallTimer) clearTimeout(stallTimer); }
-  function skip(){ cleanup(); nextMessage(); }
+/* Load ambient list (non-blocking for messages) */
+async function loadAmbientList(){
+  try{
+    const r = await fetch(API_URL, { headers: { "Accept": "application/vnd.github+json" } });
+    if (!r.ok) throw new Error('Ambient list HTTP '+r.status);
+    const items = await r.json();
+    ambient = (Array.isArray(items) ? items : [])
+      .filter(it => it.type === "file" && /\.mp3$/i.test(it.name))
+      .map(it => it.download_url);
+  } catch(e){
+    console.warn('Ambient fetch failed:', e);
+    ambient = []; // fine; messages still play
+  }
+}
 
-  m.onended = () => { cleanup(); setTimeout(nextMessage, 0); };
-  m.onerror = () => { cleanup(); skip(); };
-  m.onstalled = m.onwaiting = () => {
-    if (stallTimer) clearTimeout(stallTimer);
-    stallTimer = setTimeout(skip, MSG_STALL_MS);
-  };
-  m.onloadeddata = m.oncanplay = () => { ensurePlaying(m, showPlay); };
-  m.onplaying = () => { started = true; if (stallTimer){ clearTimeout(stallTimer); stallTimer = null; } if (startTimer){ clearTimeout(startTimer); startTimer = null; } };
-  m.ontimeupdate = () => {
-    if (m.currentTime > lastT + 0.25){
-      lastT = m.currentTime;
-      if (stallTimer){ clearTimeout(stallTimer); stallTimer = null; }
+/* Start both pipelines after tap */
+async function startPlayback(){
+  // Make decks
+  msgDeck = shuffle(messages);
+  ambDeck = shuffle(ambient);
+
+  // Start messages after delay
+  setTimeout(() => { if (ctx.state === 'running') playNextMessage(); }, MSG_DELAY_MS);
+
+  // Start ambient (if we have any)
+  if (ambDeck.length) playNextAmbient();
+}
+
+/* Keep audio running across lifecycle quirks */
+function setupWatchdogs(){
+  const tryResume = () => {
+    if (!ctx) return;
+    if (ctx.state !== 'running'){
+      ctx.resume().catch(() => showPlay());
     }
   };
-  m.onpause = () => { if (!m.ended && msgDeck.length) ensurePlaying(m, showPlay); };
-  m.onabort = m.onemptied = () => { try { m.load(); } catch{} ensurePlaying(m, showPlay); };
-
-  m.src = encodeURI(src);
-  try { m.load(); } catch {}
-  startTimer = setTimeout(() => { if(!started) skip(); }, MSG_START_MS);
-  ensurePlaying(m, showPlay);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) tryResume(); }, {passive:true});
+  window.addEventListener('pageshow', tryResume, {passive:true});
+  window.addEventListener('focus', tryResume, {passive:true});
+  // periodic nudge
+  setInterval(tryResume, WATCHDOG_MS);
 }
 
-/* Prime an element inside the tap */
-function prime(el){
-  el.muted = true;
-  return el.play().then(() => {
-    el.pause(); el.currentTime = 0; el.muted = false;
-  }).catch(()=>{ el.muted = false; });
-}
+/* Play button */
+playBtn.addEventListener('click', async () => {
+  playBtn.disabled = true;
 
-/* Lifecycle nudges */
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden){
-    if (ambDeck.length) ensurePlaying(ui.amb, showPlay);
-    if (msgDeck.length) ensurePlaying(ui.msg, showPlay);
+  // Create audio graph inside the gesture
+  if (!ctx){
+    ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+    masterGain = ctx.createGain(); masterGain.gain.value = 1.0; masterGain.connect(ctx.destination);
+    ambGain = ctx.createGain(); ambGain.gain.value = 1.0; ambGain.connect(masterGain);
+    msgGain = ctx.createGain(); msgGain.gain.value = 0.8; msgGain.connect(masterGain);
+    setupWatchdogs();
+    if ('mediaSession' in navigator){
+      try { navigator.mediaSession.metadata = new MediaMetadata({ title: 'ListenMachine' }); } catch {}
+    }
   }
-}, {passive:true});
-window.addEventListener('pageshow', () => {
-  if (ambDeck.length) ensurePlaying(ui.amb, showPlay);
-  if (msgDeck.length) ensurePlaying(ui.msg, showPlay);
-}, {passive:true
+
+  // Ensure running
+  try { await ctx.resume(); } catch { showPlay(); return; }
+
+  // Hide UI and fade title once context is alive
+  hidePlay();
+  const root = document.documentElement;
+  root.style.setProperty('--title-blur', '30px');
+  root.style.setProperty('--title-opacity', '0');
+
+  // Start messages immediately (deck now), ambient after list fetch
+  msgDeck = shuffle(messages);
+  setTimeout(() => { if (ctx.state === 'running') playNextMessage(); }, MSG_DELAY_MS);
+
+  // Ambient: if we already had a list (from earlier session), use it; then refresh
+  if (ambient.length){
+    ambDeck = shuffle(ambient);
+    playNextAmbient();
+  }
+  // Fetch latest ambient list; when ready, (re)start if nothing is playing
+  loadAmbientList().then(() => {
+    if (!ambNode){ ambDeck = shuffle(ambient); playNextAmbient(); }
+  }).catch(()=>{ /* messages still play even if this fails */ });
+}, { once: true });
+
+/* Show Play again if the context ever gets closed (rare) */
+window.addEventListener('unload', () => { try{ ctx && ctx.close(); }catch{} });
+</script>
+</body>
+</html>
