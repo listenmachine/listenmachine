@@ -6,7 +6,7 @@
 <title>ListenMachine</title>
 <meta name="color-scheme" content="dark light" />
 
-<!-- Preconnects for faster GitHub API/raw fetch -->
+<!-- Preconnects -->
 <link rel="preconnect" href="https://api.github.com" crossorigin>
 <link rel="preconnect" href="https://raw.githubusercontent.com" crossorigin>
 
@@ -115,7 +115,7 @@
     #title{ transition: none; }
   }
 
-  /* Mobile perf tweaks: remove filters & blend modes for cheaper compositing */
+  /* Mobile perf tweaks: cheaper compositing */
   @media (pointer: coarse), (max-width: 820px){
     :root{ --bg-filter: none; }
     #title, .uibtn{ mix-blend-mode: normal; }
@@ -125,11 +125,11 @@
 <body>
 
 <!-- Background videos -->
-<video id="bgA" class="bgvideo show" muted loop playsinline preload="auto" src="media/Clouds4.mp4?v=17"></video>
-<video id="bgB" class="bgvideo"        muted loop playsinline preload="auto" src="media/Nightsky.mp4?v=17"></video>
-<video id="bgC" class="bgvideo"        muted loop playsinline preload="auto" src="media/Road2.mp4?v=17"></video>
-<video id="bgD" class="bgvideo"        muted loop playsinline preload="auto" src="media/Forest.mp4?v=17"></video>
-<video id="bgE" class="bgvideo"        muted loop playsinline preload="auto" src="media/Snow3.mp4?v=17"></video>
+<video id="bgA" class="bgvideo show" muted loop playsinline preload="auto" src="media/Clouds4.mp4?v=18"></video>
+<video id="bgB" class="bgvideo"        muted loop playsinline preload="auto" src="media/Nightsky.mp4?v=18"></video>
+<video id="bgC" class="bgvideo"        muted loop playsinline preload="auto" src="media/Road2.mp4?v=18"></video>
+<video id="bgD" class="bgvideo"        muted loop playsinline preload="auto" src="media/Forest.mp4?v=18"></video>
+<video id="bgE" class="bgvideo"        muted loop playsinline preload="auto" src="media/Snow3.mp4?v=18"></video>
 
 <!-- Title -->
 <div class="title-wrap">
@@ -140,8 +140,13 @@
 <button id="play" class="uibtn" type="button" aria-label="Play">PLAY</button>
 
 <!-- Audio sinks -->
-<audio id="sink" preload="auto" playsinline></audio>   <!-- WebAudio sink (unused unless BACKGROUND_MODE='full') -->
+<audio id="sink" preload="auto" playsinline></audio>   <!-- WebAudio sink if you ever use BACKGROUND_MODE='full' -->
 <audio id="ambEl" preload="auto" playsinline></audio>  <!-- Mobile ambient fallback -->
+
+<!-- Make a single global feature flag to avoid redeclaration collisions -->
+<script>
+  window.IS_MOBILE = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+</script>
 
 <script>
 /* -------- Auto-fit title to ONE line -------- */
@@ -167,12 +172,9 @@
 
 <script>
 /* ===== BACKGROUND LOOP with mobile perf optimizations ===== */
-const IS_MOBILE = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
-
-/* Shorter overlap on mobile, keep your long dissolve on desktop */
 const BG = {
-  displayMs: IS_MOBILE ? 7000  : 5000,
-  fadeMs:    IS_MOBILE ? 9000  : 55000,
+  displayMs: window.IS_MOBILE ? 7000  : 5000,
+  fadeMs:    window.IS_MOBILE ? 9000  : 55000,
   firstHoldAfterClickMs: 10000
 };
 
@@ -212,7 +214,7 @@ const BG = {
     setTimeout(crossfade, BG.displayMs + BG.fadeMs);
   }
 
-  /* When user taps Play, begin by playing only the first (and prepping the next) */
+  /* Start when user taps Play */
   const playBtn = document.getElementById('play');
   if (playBtn) {
     playBtn.addEventListener('click', () => {
@@ -221,7 +223,7 @@ const BG = {
     }, { once: true });
   }
 
-  /* If page regains focus, nudge playback */
+  /* Nudge on refocus */
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) playOnlyCurrentAndNext(i);
   }, {passive:true});
@@ -231,23 +233,22 @@ const BG = {
 <!-- ===================== AUDIO ===================== -->
 <script>
 /* ======= Modes ======= */
-const BACKGROUND_MODE = 'pause'; // keep foreground-first unless you want screen-off messages too
+const BACKGROUND_MODE = 'pause'; // keep foreground-first
 
 /* Device heuristics */
-const IS_MOBILE = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
-const AMBIENT_VIA_HTML = IS_MOBILE; // mobile uses <audio> to keep ambient rolling screen-off
+const AMBIENT_VIA_HTML = window.IS_MOBILE; // mobile uses <audio> to keep ambient rolling screen-off
 
 /* Latency */
-const AUDIO_LATENCY_HINT = IS_MOBILE ? 'playback' : 'interactive';
+const AUDIO_LATENCY_HINT = window.IS_MOBILE ? 'playback' : 'interactive';
 
 /* Connection/CPU heuristics */
 const conn = navigator.connection || {};
 const HW = navigator.hardwareConcurrency || 4;
-const IS_LOW = IS_MOBILE &&
+const IS_LOW = window.IS_MOBILE &&
                (conn.saveData || /^(2g|3g)$/i.test(conn.effectiveType || '') || HW <= 4);
 
 /* ======= Tunables ======= */
-const AUDIO_V        = 52;            // bump to force redownload if you replace audio
+const AUDIO_V        = 53;            // bump to force redownload if you replace audio
 const MAX_MSG        = 154;           // number of message files
 const MSG_DELAY_MS   = 5000;          // 5s start after tap
 
