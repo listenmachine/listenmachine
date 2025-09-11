@@ -9,6 +9,8 @@
 <!-- Preconnects -->
 <link rel="preconnect" href="https://api.github.com" crossorigin>
 <link rel="preconnect" href="https://raw.githubusercontent.com" crossorigin>
+<!-- Preload ONLY the first background so time-to-first-frame is instant -->
+<link rel="preload" as="video" href="media/Clouds4.mp4?v=22" type="video/mp4" />
 
 <style>
   :root{
@@ -18,6 +20,8 @@
     --title-opacity: 1;
     --title-fade-ms: 20000ms;
     --bg-filter: saturate(0.95) contrast(0.96) brightness(1.06) blur(0px);
+    /* NEW: tie video transition to JS-configured fade to avoid decoder overlap */
+    --bg-fade-ms: 20000ms;
   }
 
   html, body { height: 100%; }
@@ -40,7 +44,7 @@
     background:#000;
     filter: var(--bg-filter);
     opacity: 0;
-    transition: opacity 20000ms linear;
+    transition: opacity var(--bg-fade-ms) linear; /* was hard-coded 20000ms */
     will-change: opacity;
     contain: paint;
     backface-visibility: hidden;
@@ -68,7 +72,7 @@
     line-height: 1.06;
     color: var(--ui-color);
     user-select: none;
-    font-size: 8vw; /* auto-shrinks via JS */
+    font-size: 8vw;
     will-change: font-size, filter, opacity;
     mix-blend-mode: soft-light;
     filter: blur(var(--title-blur));
@@ -76,7 +80,6 @@
     transition: filter var(--title-fade-ms) linear, opacity var(--title-fade-ms) linear;
   }
 
-  /* Play button (shares title blur/fade) */
   .uibtn{
     position: fixed;
     left: 50%; top: 50%;
@@ -125,12 +128,12 @@
 <body>
 
 <!-- Background videos -->
-<!-- Clouds loops on load; others idle until crossfade starts -->
-<video id="bgA" class="bgvideo show" muted loop playsinline autoplay preload="auto" src="media/Clouds4.mp4?v=21"></video>
-<video id="bgB" class="bgvideo"        muted loop playsinline preload="auto" src="media/Nightsky.mp4?v=21"></video>
-<video id="bgC" class="bgvideo"        muted loop playsinline preload="auto" src="media/Road2.mp4?v=21"></video>
-<video id="bgD" class="bgvideo"        muted loop playsinline preload="auto" src="media/Forest.mp4?v=21"></video>
-<video id="bgE" class="bgvideo"        muted loop playsinline preload="auto" src="media/Snow3.mp4?v=21"></video>
+<!-- Clouds preloads/auto-plays; others only load metadata until needed -->
+<video id="bgA" class="bgvideo show" muted loop playsinline autoplay preload="auto"     src="media/Clouds4.mp4?v=22"></video>
+<video id="bgB" class="bgvideo"        muted loop playsinline         preload="metadata" src="media/Nightsky.mp4?v=22"></video>
+<video id="bgC" class="bgvideo"        muted loop playsinline         preload="metadata" src="media/Road2.mp4?v=22"></video>
+<video id="bgD" class="bgvideo"        muted loop playsinline         preload="metadata" src="media/Forest.mp4?v=22"></video>
+<video id="bgE" class="bgvideo"        muted loop playsinline         preload="metadata" src="media/Snow3.mp4?v=22"></video>
 
 <!-- Title -->
 <div class="title-wrap">
@@ -141,10 +144,9 @@
 <button id="play" class="uibtn" type="button" aria-label="Play">PLAY</button>
 
 <!-- Audio sinks -->
-<audio id="sink" preload="auto" playsinline></audio>   <!-- WebAudio sink if BACKGROUND_MODE='full' -->
-<audio id="ambEl" preload="auto" playsinline></audio>  <!-- Mobile ambient fallback -->
+<audio id="sink" preload="auto" playsinline></audio>
+<audio id="ambEl" preload="auto" playsinline></audio>
 
-<!-- One namespace flag, once -->
 <script>
   window.LM = window.LM || {};
   window.LM.IS_MOBILE = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
@@ -173,15 +175,25 @@
 </script>
 
 <script>
-/* ===== BACKGROUND LOOP =====
-   Desktop: show/loop Clouds until PLAY, then start crossfade
-   Mobile: start crossfade after PLAY (saves battery/GPU) */
+/* ===== BACKGROUND LOOP ===== */
 (() => {
+  // Tunables
   const BG = {
     displayMs: window.LM.IS_MOBILE ? 7000  : 5000,
-    fadeMs:    window.LM.IS_MOBILE ? 9000  : 55000,
+    fadeMs:    window.LM.IS_MOBILE ? 9000  : 55000, // visual design unchanged
     firstHoldAfterClickMs: 10000
   };
+
+  // Heuristic: on low-power desktops, disable costly per-pixel filter
+  const conn = navigator.connection || {};
+  const cores = navigator.hardwareConcurrency || 4;
+  const isLowish = (!window.LM.IS_MOBILE) && (cores <= 4 || /^(2g|3g)$/i.test(conn.effectiveType||''));
+  if (isLowish) {
+    document.documentElement.style.setProperty('--bg-filter', 'none');
+  }
+
+  // NEW: keep CSS transition in lockstep with JS fade length
+  document.documentElement.style.setProperty('--bg-fade-ms', BG.fadeMs + 'ms');
 
   const vids = ['bgA','bgB','bgC','bgD','bgE'].map(id => document.getElementById(id));
   let i = 0;
@@ -193,19 +205,32 @@
     vids.forEach((v, k) => { try { (k === idx || k === nextIdx) ? v.play() : v.pause(); } catch(e){} });
   }
 
+  // Pre-arm the next video a moment before the crossfade to avoid a cold start
+  function warmNext(next){
+    try {
+      if (next.preload !== 'auto') next.preload = 'auto'; // was metadata
+      // Kicks off buffering without flashing a frame
+      next.load();
+    } catch(e){}
+  }
+
   function crossfade(){
     const cur = vids[i];
     const nextIdx = (i + 1) % vids.length;
     const next = vids[nextIdx];
 
-    try { next.play(); } catch(e){}
+    warmNext(next);         // just-in-time buffer
+    try { next.play(); } catch(e) {}
     next.classList.add('show');
     cur.classList.remove('show');
 
     const prevIdx = i;
     i = nextIdx;
 
-    setTimeout(() => { try{ vids[prevIdx].pause(); }catch{} playOnlyCurrentAndNext(i); }, BG.fadeMs + 60);
+    // Pause the previous as soon as its fade truly completes (now matches CSS)
+    setTimeout(() => { try{ vids[prevIdx].pause(); }catch{} playOnlyCurrentAndNext(i); }, BG.fadeMs + 40);
+
+    // Schedule the next crossfade cycle
     setTimeout(crossfade, BG.displayMs + BG.fadeMs);
   }
 
@@ -218,18 +243,14 @@
 
   const playBtn = document.getElementById('play');
 
-  // Desktop idle behavior: loop Clouds immediately, no crossfade yet
   if (!window.LM.IS_MOBILE) {
     playOnly(0); // keep Clouds looping
-    // Start crossfade only after PLAY
     if (playBtn) playBtn.addEventListener('click', () => startLoop(BG.firstHoldAfterClickMs), { once: true });
   } else {
-    // Mobile: wait for PLAY, then start crossfade
     vids.forEach(v => { try{ v.pause(); }catch{} });
     if (playBtn) playBtn.addEventListener('click', () => startLoop(BG.firstHoldAfterClickMs), { once: true });
   }
 
-  // If the page regains focus, ensure expected video state
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
       if (loopStarted) playOnlyCurrentAndNext(i);
@@ -239,14 +260,14 @@
 })();
 </script>
 
-<!-- ===================== AUDIO ===================== -->
+<!-- ===================== AUDIO (unchanged) ===================== -->
 <script>
 (() => {
 /* ======= Modes ======= */
-const BACKGROUND_MODE = 'pause'; // set to 'full' if you want screen-off messages too
+const BACKGROUND_MODE = 'pause';
 
 /* Device heuristics */
-const AMBIENT_VIA_HTML = window.LM.IS_MOBILE; // mobile uses <audio> for ambient
+const AMBIENT_VIA_HTML = window.LM.IS_MOBILE;
 
 /* Latency */
 const AUDIO_LATENCY_HINT = window.LM.IS_MOBILE ? 'playback' : 'interactive';
@@ -258,9 +279,9 @@ const IS_LOW = window.LM.IS_MOBILE &&
                (conn.saveData || /^(2g|3g)$/i.test(conn.effectiveType || '') || HW <= 4);
 
 /* ======= Tunables ======= */
-const AUDIO_V        = 55;            // cache-bust for audio
-const MAX_MSG        = 154;           // number of message files
-const MSG_DELAY_MS   = 6000;          // 6s start after tap
+const AUDIO_V        = 55;
+const MAX_MSG        = 154;
+const MSG_DELAY_MS   = 6000;
 
 /* Prefetch/decode horizons (adaptive) */
 const PREFETCH_AHEAD = IS_LOW ? 2 : 3;
@@ -420,7 +441,7 @@ function startAmbientWebAudio(){
   loadAmbientList().then(() => { if (!ambNode && !AMBIENT_VIA_HTML){ ambDeck = shuffle(ambient); playNextAmbientWebAudio(); } }).catch(()=>{});
 }
 
-/* Mobile HTMLAudio (more robust screen-off) */
+/* Mobile HTMLAudio */
 function playNextAmbientHTML(){
   if (!ambient.length){ return; }
   if (!ambDeck.length){ ambDeck = shuffle(ambient); }
