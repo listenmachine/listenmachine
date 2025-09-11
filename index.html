@@ -14,13 +14,9 @@
   :root{
     --ui-alpha: 0.26;
     --ui-color: rgba(255,255,255,var(--ui-alpha));
-
-    /* Title animation controls */
     --title-blur: 0px;
     --title-opacity: 1;
     --title-fade-ms: 20000ms;
-
-    /* Global video look */
     --bg-filter: saturate(0.95) contrast(0.96) brightness(1.06) blur(0px);
   }
 
@@ -131,7 +127,7 @@
 <!-- Play -->
 <button id="play" class="playbtn" type="button" aria-label="Play">PLAY</button>
 
-<!-- Hidden audio sink for background-safe playback -->
+<!-- Optional hidden sink (only used if BACKGROUND_MODE === 'full') -->
 <audio id="sink" preload="auto" playsinline></audio>
 
 <script>
@@ -191,17 +187,40 @@ const BG = { displayMs: 5000, fadeMs: 55000, firstHoldAfterClickMs: 10000 };
 })();
 </script>
 
-<!-- ===================== AUDIO (Web Audio + background sink + predecode & preschedule) ===================== -->
+<!-- ===================== AUDIO (Web Audio, foreground-first, serial decode) ===================== -->
 <script>
-/* ==== Tunables ==== */
-const AUDIO_V        = 47;    // bump when replacing files (cache-bust)
-const MAX_MSG        = 154;   // number of message files
-const MSG_DELAY_MS   = 3000;  // start messages after tap
-const PREFETCH_AHEAD = 5;     // how many upcoming messages to prefetch (compressed bytes)
-const DECODE_AHEAD   = 2;     // how many to keep decoded ahead (for locked screen)
-const MSG_TIMEOUT_MS = 5000;  // hard timeout for immediate fetch/decode
-const BG_TIMEOUT_MS  = 12000; // background prefetch timeout
-const XFADE_SEC      = 0.04;  // tiny crossfade between messages (in seconds)
+/* ======= Modes ======= */
+/* Foreground-first by default (smoothest desktop/open phones).
+   Set to 'full' to enable screen-locked playback via hidden <audio> sink. */
+const BACKGROUND_MODE = 'pause'; // 'pause' | 'full'
+
+/* Latency: snappy on desktop, larger buffer on mobile for smoothness */
+const AUDIO_LATENCY_HINT = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)
+  ? 'playback'
+  : 'interactive';
+
+/* Connection/CPU heuristics */
+const conn = navigator.connection || {};
+const HW = navigator.hardwareConcurrency || 4;
+const IS_LOW = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) &&
+               (conn.saveData || /^(2g|3g)$/i.test(conn.effectiveType || '') || HW <= 4);
+
+/* ======= Tunables ======= */
+const AUDIO_V        = 50;            // bump to force redownload if you replace audio
+const MAX_MSG        = 154;           // number of message files
+const MSG_DELAY_MS   = 3000;          // start messages after tap
+
+/* Prefetch/decode horizons (adaptive) */
+const PREFETCH_AHEAD = IS_LOW ? 2 : 3;     // compressed bytes to fetch ahead
+const DECODE_AHEAD   = IS_LOW ? 1 : 2;     // decoded buffers kept ready
+
+/* Timeouts */
+const MSG_TIMEOUT_MS = 5000;          // immediate fetch/decode cap
+const BG_TIMEOUT_MS  = 12000;         // background prefetch cap
+
+/* Scheduling */
+const SCHEDULE_LEAD_SEC = IS_LOW ? 0.6 : 0.4;  // schedule starts this far ahead
+const XFADE_SEC         = IS_LOW ? 0.00 : 0.02; // tiny crossfade (0 on low-end)
 
 /* Sources */
 const GH = { owner: "listenmachine", repo: "listenmachine", path: "audio/ambient" };
@@ -209,170 +228,143 @@ const API_URL = `https://api.github.com/repos/${GH.owner}/${GH.repo}/contents/${
 
 /* Build message list: 1..MAX_MSG */
 const messages = Array.from({length: MAX_MSG}, (_, i) => `audio/messages/${i+1}.mp3`);
+const withV = url => url + (url.includes('?') ? '&' : '?') + 'v=' + AUDIO_V;
 
-/* Ambient list is fetched at runtime from GitHub API (download_url) */
-let ambient = [];
-
-/* Utils */
-const $ = s => document.querySelector(s);
-const playBtn = $('#play');
-const sinkEl = $('#sink');
-
+/* Elements */
+const playBtn = document.getElementById('play');
+const sinkEl  = document.getElementById('sink');
 function showPlay(){ playBtn.classList.remove('hidden'); playBtn.disabled = false; }
 function hidePlay(){ playBtn.classList.add('hidden'); playBtn.disabled = true; }
 function shuffle(a){ const r=a.slice(); for(let i=r.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1)); [r[i],r[j]]=[r[j],r[i]];} return r; }
-const withV = url => url + (url.includes('?') ? '&' : '?') + 'v=' + AUDIO_V;
 
-/* Web Audio */
+/* Web Audio graph */
 let ctx = null, masterGain = null, ambGain = null, msgGain = null, mediaDest = null;
 
 /* Decks */
-let msgDeck = [], ambDeck = [];
+let msgDeck = [], ambDeck = [], ambient = [];
 
 /* Caches */
-const msgABCache   = new Map();      // url -> ArrayBuffer (compressed)
-const msgBufCache  = new Map();      // url -> AudioBuffer (decoded)
-const abPending    = new Map();      // url -> Promise<ArrayBuffer>
-const bufPending   = new Map();      // url -> Promise<AudioBuffer>
-const AB_LIMIT     = 8;              // keep up to 8 compressed files
+const AB_LIMIT = IS_LOW ? 4 : 8;
+const msgABCache  = new Map();   // url -> ArrayBuffer (compressed)
+const msgBufCache = new Map();   // url -> AudioBuffer (decoded)
+const abPending   = new Map();   // url -> Promise<ArrayBuffer>
+const bufPending  = new Map();   // url -> Promise<AudioBuffer>
 
-/* Scheduling state */
-let msgScheduleTime = 0;             // next scheduled start time (AudioContext time)
-let scheduledUrls   = [];            // URLs already scheduled (in order)
+/* Serial decode queue (avoid CPU spikes) */
+let decodeTail = Promise.resolve();
+function queueDecode(work){ const p = decodeTail.then(work, work); decodeTail = p.catch(()=>{}); return p; }
 
-/* Current ambient node */
+/* Scheduling */
+let msgScheduleTime = 0;         // AudioContext time for next start
+let scheduledUrls   = [];        // track scheduled items
+let schedulingPaused = false;    // pause while hidden in 'pause' mode
 let ambNode = null;
 
 /* Fetch helpers */
 async function fetchAB(url, timeoutMs){
   const u = withV(url);
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try{
     const res = await fetch(u, {mode:'cors', cache:'force-cache', signal: ctrl.signal});
     if (!res.ok) throw new Error('HTTP '+res.status);
     return await res.arrayBuffer();
   } finally { clearTimeout(t); }
 }
-
 function getAB(url, timeoutMs){
   if (msgABCache.has(url)) return Promise.resolve(msgABCache.get(url));
   if (abPending.has(url))  return abPending.get(url);
   const p = fetchAB(url, timeoutMs).then(ab => {
-    if (msgABCache.size >= AB_LIMIT){
-      const firstKey = msgABCache.keys().next().value;
-      msgABCache.delete(firstKey);
-    }
-    msgABCache.set(url, ab);
-    abPending.delete(url);
-    return ab;
+    // FIFO cap
+    if (msgABCache.size >= AB_LIMIT){ const first = msgABCache.keys().next().value; msgABCache.delete(first); }
+    msgABCache.set(url, ab); abPending.delete(url); return ab;
   }).catch(e => { abPending.delete(url); throw e; });
-  abPending.set(url, p);
-  return p;
+  abPending.set(url, p); return p;
 }
-
 function decodeAB(ab, timeoutMs){
   return new Promise((resolve, reject) => {
-    let done = false;
-    const to = setTimeout(() => { if(!done) reject(new Error('decode timeout')); }, timeoutMs);
-    ctx.decodeAudioData(ab.slice(0), buf => { done=true; clearTimeout(to); resolve(buf); },
-                             err => { done=true; clearTimeout(to); reject(err); });
+    let done=false; const to=setTimeout(()=>{ if(!done) reject(new Error('decode timeout')); }, timeoutMs);
+    ctx.decodeAudioData(ab.slice(0), b=>{ done=true; clearTimeout(to); resolve(b); },
+                               e=>{ done=true; clearTimeout(to); reject(e); });
   });
 }
-
 async function getDecoded(url, timeoutMs){
   if (msgBufCache.has(url)) return msgBufCache.get(url);
   if (bufPending.has(url))  return bufPending.get(url);
-  const p = getAB(url, timeoutMs).then(ab => decodeAB(ab, timeoutMs)).then(buf => {
-    msgBufCache.set(url, buf);
-    bufPending.delete(url);
-    return buf;
-  }).catch(e => { bufPending.delete(url); throw e; });
-  bufPending.set(url, p);
-  return p;
+  const p = (async () => {
+    const ab = await getAB(url, timeoutMs);
+    return queueDecode(() => decodeAB(ab, timeoutMs));
+  })().then(buf => { msgBufCache.set(url, buf); return buf; }).finally(()=> bufPending.delete(url));
+  bufPending.set(url, p); return p;
 }
 
-/* Prefetch & pre-decode ahead */
+/* Maintain prefetch/decoded horizon */
 function maintainAhead(){
-  // Prefetch compressed bytes
-  for (let i = 0; i < Math.min(PREFETCH_AHEAD, msgDeck.length); i++){
-    const url = msgDeck[i];
-    getAB(url, BG_TIMEOUT_MS).catch(()=>{});
+  // compressed prefetch
+  for (let i=0; i<Math.min(PREFETCH_AHEAD, msgDeck.length); i++){
+    const url = msgDeck[i]; getAB(url, BG_TIMEOUT_MS).catch(()=>{});
   }
-  // Pre-decode up to DECODE_AHEAD (but not already scheduled)
+  // decoded buffers
   let need = DECODE_AHEAD;
-  for (let i = 0; i < msgDeck.length && need > 0; i++){
+  for (let i=0; i<msgDeck.length && need>0; i++){
     const url = msgDeck[i];
-    if (!scheduledUrls.includes(url) && !msgBufCache.has(url)){
+    if (!scheduledUrls.includes(url) && !msgBufCache.has(url) && !bufPending.has(url)){
       getDecoded(url, BG_TIMEOUT_MS).catch(()=>{});
       need--;
     }
   }
 }
 
-/* Schedule as many messages as possible (no timers needed while locked) */
+/* Schedule decoded messages (no timers needed during playback) */
 function scheduleMessages(){
+  if (!ctx || schedulingPaused) return;
+  const now = ctx.currentTime;
   while (msgDeck.length){
     const nextUrl = msgDeck[0];
     const buf = msgBufCache.get(nextUrl);
-    if (!buf) break; // wait until decoded
+    if (!buf) break;
 
-    // Remove from deck; mark scheduled
-    msgDeck.shift();
-    scheduledUrls.push(nextUrl);
+    const earliest = now + SCHEDULE_LEAD_SEC;
+    const startAt  = Math.max(msgScheduleTime, earliest);
+    const endAt    = startAt + buf.duration;
 
-    const src  = ctx.createBufferSource();
-    const g    = ctx.createGain();
-    src.buffer = buf;
-    src.connect(g);
-    g.connect(msgGain);
+    // remove + mark
+    msgDeck.shift(); scheduledUrls.push(nextUrl);
 
-    // Crossfade with previous message if overlapping
-    const startAt = Math.max(msgScheduleTime, ctx.currentTime + 0.02);
-    const endAt   = startAt + buf.duration;
-    const fade = XFADE_SEC;
+    const src = ctx.createBufferSource(); src.buffer = buf;
+    const g = ctx.createGain(); src.connect(g); g.connect(msgGain);
 
-    // Fade in
-    g.gain.setValueAtTime(0, startAt);
-    g.gain.linearRampToValueAtTime(1, startAt + fade);
+    if (XFADE_SEC > 0){
+      g.gain.setValueAtTime(0, startAt);
+      g.gain.linearRampToValueAtTime(1, startAt + XFADE_SEC);
+      g.gain.setValueAtTime(1, endAt - XFADE_SEC);
+      g.gain.linearRampToValueAtTime(0, endAt);
+    } else {
+      g.gain.setValueAtTime(1, startAt);
+    }
 
-    // Fade out
-    g.gain.setValueAtTime(1, endAt - fade);
-    g.gain.linearRampToValueAtTime(0, endAt);
-
-    src.start(startAt);
-
-    // Advance schedule time with tiny padding
+    try { src.start(startAt); } catch {}
     msgScheduleTime = endAt + 0.01;
 
-    // Free decoded buffer once scheduled to keep memory steady
-    // (the source node holds an internal ref until it plays)
+    // free decoded buffer (source retains internal ref)
     msgBufCache.delete(nextUrl);
-
-    // Keep the loop going to schedule more if we already have them decoded
   }
 }
 
-/* Ambient playback (simple chain; optional to make it prescheduled too) */
+/* Ambient (shares decode queue to avoid contention) */
 async function playNextAmbient(){
-  if (!ctx) return;
-  if (!ambDeck.length) return;
+  if (!ctx || !ambDeck.length) return;
   const url = ambDeck.shift();
   try{
     const ab  = await getAB(url, BG_TIMEOUT_MS);
-    const buf = await decodeAB(ab, BG_TIMEOUT_MS);
-    ambNode = ctx.createBufferSource();
-    ambNode.buffer = buf;
-    ambNode.connect(ambGain);
-    ambNode.onended = () => { ambNode = null; playNextAmbient(); };
-    ambNode.start(Math.max(ctx.currentTime + 0.02, 0));
-  }catch(_e){
-    // skip on error
-    playNextAmbient();
-  }
+    const buf = await queueDecode(() => decodeAB(ab, BG_TIMEOUT_MS));
+    const src = ctx.createBufferSource(); src.buffer = buf; src.connect(ambGain);
+    src.onended = () => { ambNode = null; playNextAmbient(); };
+    const startAt = Math.max(ctx.currentTime + 0.2, 0);
+    src.start(startAt); ambNode = src;
+  }catch(_e){ playNextAmbient(); }
 }
 
-/* Load ambient list */
+/* Ambient list */
 async function loadAmbientList(){
   try{
     const r = await fetch(API_URL, { headers: { "Accept": "application/vnd.github+json" } });
@@ -381,92 +373,74 @@ async function loadAmbientList(){
     ambient = (Array.isArray(items) ? items : [])
       .filter(it => it.type === "file" && /\.mp3$/i.test(it.name))
       .map(it => it.download_url);
-  } catch(e){
-    console.warn('Ambient fetch failed:', e);
-    ambient = [];
-  }
+  }catch(e){ console.warn('Ambient fetch failed:', e); ambient = []; }
 }
 
 /* Lifecycle resilience */
-function setupWatchdogs(){
-  const tryResume = async () => {
-    if (!ctx) return;
-    if (ctx.state !== 'running'){
-      try { await ctx.resume(); } catch { showPlay(); return; }
-    }
-    // If we resumed, try to schedule any messages whose buffers are ready
-    scheduleMessages();
-  };
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) tryResume(); }, {passive:true});
-  window.addEventListener('pageshow', tryResume, {passive:true});
-  window.addEventListener('focus', tryResume, {passive:true});
-  setInterval(tryResume, 5000);
+async function tryResumeAndSchedule(){
+  if (!ctx) return;
+  if (ctx.state !== 'running'){
+    try { await ctx.resume(); } catch { showPlay(); return; }
+  }
+  maintainAhead(); scheduleMessages();
 }
+document.addEventListener('visibilitychange', async () => {
+  if (document.hidden && BACKGROUND_MODE === 'pause'){
+    schedulingPaused = true;       // stop scheduling while hidden
+  } else {
+    schedulingPaused = false;      // resume on return
+    tryResumeAndSchedule();
+  }
+}, {passive:true});
+window.addEventListener('pageshow', tryResumeAndSchedule, {passive:true});
+window.addEventListener('focus', tryResumeAndSchedule, {passive:true});
 
-/* Start sequence on tap */
-document.getElementById('play').addEventListener('click', async () => {
+/* Start on tap */
+playBtn.addEventListener('click', async () => {
   playBtn.disabled = true;
 
   if (!ctx){
-    ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+    ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: AUDIO_LATENCY_HINT });
     masterGain = ctx.createGain(); masterGain.gain.value = 1.0;
     ambGain    = ctx.createGain(); ambGain.gain.value = 1.0;
     msgGain    = ctx.createGain(); msgGain.gain.value = 0.8;
 
-    // Route to MediaStream -> hidden <audio> sink for background-safe playback
-    mediaDest = ctx.createMediaStreamDestination();
-    masterGain.connect(mediaDest);
-    ambGain.connect(masterGain);
-    msgGain.connect(masterGain);
-    const sink = document.getElementById('sink');
-    sink.srcObject = mediaDest.stream;
-
-    setupWatchdogs();
+    if (BACKGROUND_MODE === 'full'){
+      // Route graph to hidden <audio> sink for screen-locked playback
+      mediaDest = ctx.createMediaStreamDestination();
+      ambGain.connect(masterGain); msgGain.connect(masterGain); masterGain.connect(mediaDest);
+      sinkEl.srcObject = mediaDest.stream;
+    } else {
+      // Foreground-first: direct to device
+      ambGain.connect(masterGain); msgGain.connect(masterGain); masterGain.connect(ctx.destination);
+    }
 
     if ('mediaSession' in navigator){
-      try {
-        navigator.mediaSession.metadata = new MediaMetadata({ title: 'ListenMachine' });
-        navigator.mediaSession.setActionHandler('play',  () => sink.play());
-        navigator.mediaSession.setActionHandler('pause', () => sink.pause());
-      } catch {}
+      try { navigator.mediaSession.metadata = new MediaMetadata({ title: 'ListenMachine' }); } catch {}
     }
   }
 
-  try {
-    await ctx.resume();
-    await sinkEl.play();  // start the sink inside the gesture
-  } catch {
-    showPlay();
-    return;
-  }
+  try { await ctx.resume(); } catch { showPlay(); return; }
+  if (BACKGROUND_MODE === 'full'){ try { await sinkEl.play(); } catch { showPlay(); return; } }
 
   hidePlay();
   const root = document.documentElement;
   root.style.setProperty('--title-blur', '30px');
   root.style.setProperty('--title-opacity', '0');
 
-  // Build message deck & scheduling horizon
-  msgDeck = shuffle(messages).map(u => u);        // clone
+  // Message deck & initial schedule horizon
+  msgDeck = shuffle(messages).map(u => u);
   msgScheduleTime = ctx.currentTime + (MSG_DELAY_MS / 1000);
 
-  // Prefetch & pre-decode some ahead, then schedule immediately if ready
-  maintainAhead();
-  scheduleMessages();
-
-  // Keep maintaining ahead in the background
+  // Maintain + schedule in a light loop
   const maint = () => { maintainAhead(); scheduleMessages(); };
-  const maintId = setInterval(maint, 1500); // light touch
+  maint();
+  setInterval(maint, 2000);
 
   // Ambient: use any cached list, then refresh
-  if (ambient.length){
-    ambDeck = shuffle(ambient);
-    playNextAmbient();
-  }
-  loadAmbientList().then(() => {
-    if (!ambNode){ ambDeck = shuffle(ambient); playNextAmbient(); }
-  }).catch(()=>{});
-
-}, { once: true });
+  if (ambient.length){ ambDeck = shuffle(ambient); playNextAmbient(); }
+  loadAmbientList().then(() => { if (!ambNode){ ambDeck = shuffle(ambient); playNextAmbient(); } }).catch(()=>{});
+}, { once:true });
 </script>
 </body>
 </html>
