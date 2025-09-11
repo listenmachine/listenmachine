@@ -115,7 +115,7 @@
     #title{ transition: none; }
   }
 
-  /* Mobile perf tweaks: cheaper compositing */
+  /* Mobile perf: cheaper compositing */
   @media (pointer: coarse), (max-width: 820px){
     :root{ --bg-filter: none; }
     #title, .uibtn{ mix-blend-mode: normal; }
@@ -125,11 +125,11 @@
 <body>
 
 <!-- Background videos -->
-<video id="bgA" class="bgvideo show" muted loop playsinline preload="auto" src="media/Clouds4.mp4?v=18"></video>
-<video id="bgB" class="bgvideo"        muted loop playsinline preload="auto" src="media/Nightsky.mp4?v=18"></video>
-<video id="bgC" class="bgvideo"        muted loop playsinline preload="auto" src="media/Road2.mp4?v=18"></video>
-<video id="bgD" class="bgvideo"        muted loop playsinline preload="auto" src="media/Forest.mp4?v=18"></video>
-<video id="bgE" class="bgvideo"        muted loop playsinline preload="auto" src="media/Snow3.mp4?v=18"></video>
+<video id="bgA" class="bgvideo show" muted loop playsinline autoplay preload="auto" src="media/Clouds4.mp4?v=20"></video>
+<video id="bgB" class="bgvideo"        muted loop playsinline autoplay preload="auto" src="media/Nightsky.mp4?v=20"></video>
+<video id="bgC" class="bgvideo"        muted loop playsinline autoplay preload="auto" src="media/Road2.mp4?v=20"></video>
+<video id="bgD" class="bgvideo"        muted loop playsinline autoplay preload="auto" src="media/Forest.mp4?v=20"></video>
+<video id="bgE" class="bgvideo"        muted loop playsinline autoplay preload="auto" src="media/Snow3.mp4?v=20"></video>
 
 <!-- Title -->
 <div class="title-wrap">
@@ -140,17 +140,18 @@
 <button id="play" class="uibtn" type="button" aria-label="Play">PLAY</button>
 
 <!-- Audio sinks -->
-<audio id="sink" preload="auto" playsinline></audio>   <!-- WebAudio sink if you ever use BACKGROUND_MODE='full' -->
+<audio id="sink" preload="auto" playsinline></audio>   <!-- WebAudio sink if BACKGROUND_MODE='full' -->
 <audio id="ambEl" preload="auto" playsinline></audio>  <!-- Mobile ambient fallback -->
 
-<!-- Make a single global feature flag to avoid redeclaration collisions -->
+<!-- One flag, once -->
 <script>
-  window.IS_MOBILE = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+  window.LM = window.LM || {};
+  window.LM.IS_MOBILE = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
 </script>
 
 <script>
 /* -------- Auto-fit title to ONE line -------- */
-(function(){
+(() => {
   const title = document.getElementById('title');
   function fit(){
     const container = title.parentElement;
@@ -171,25 +172,22 @@
 </script>
 
 <script>
-/* ===== BACKGROUND LOOP with mobile perf optimizations ===== */
-const BG = {
-  displayMs: window.IS_MOBILE ? 7000  : 5000,
-  fadeMs:    window.IS_MOBILE ? 9000  : 55000,
-  firstHoldAfterClickMs: 10000
-};
+/* ===== BACKGROUND LOOP (desktop autoplay; mobile waits for tap) ===== */
+(() => {
+  const BG = {
+    displayMs: window.LM.IS_MOBILE ? 7000  : 5000,
+    fadeMs:    window.LM.IS_MOBILE ? 9000  : 55000,
+    firstHoldAfterClickMs: 10000
+  };
 
-(function setupBackgroundLoop(){
   const vids = ['bgA','bgB','bgC','bgD','bgE'].map(id => document.getElementById(id));
-
-  /* Play only the current and next videos; pause the rest */
   let i = 0;
+  let loopStarted = false;
+
   function playOnlyCurrentAndNext(idx){
     const nextIdx = (idx + 1) % vids.length;
     vids.forEach((v, k) => {
-      try {
-        if (k === idx || k === nextIdx) { v.play(); }
-        else { v.pause(); }
-      } catch(e){}
+      try { (k === idx || k === nextIdx) ? v.play() : v.pause(); } catch(e){}
     });
   }
 
@@ -205,50 +203,56 @@ const BG = {
     const prevIdx = i;
     i = nextIdx;
 
-    /* After the overlap ends, pause the previous to save CPU/GPU */
-    setTimeout(() => {
-      try { vids[prevIdx].pause(); } catch(e){}
-      playOnlyCurrentAndNext(i);
-    }, BG.fadeMs + 60);
-
+    setTimeout(() => { try{ vids[prevIdx].pause(); }catch{} playOnlyCurrentAndNext(i); }, BG.fadeMs + 60);
     setTimeout(crossfade, BG.displayMs + BG.fadeMs);
   }
 
-  /* Start when user taps Play */
-  const playBtn = document.getElementById('play');
-  if (playBtn) {
-    playBtn.addEventListener('click', () => {
-      playOnlyCurrentAndNext(i);
-      setTimeout(crossfade, BG.firstHoldAfterClickMs);
-    }, { once: true });
+  function startLoop(initialDelay){
+    if (loopStarted) return;
+    loopStarted = true;
+    playOnlyCurrentAndNext(i);
+    setTimeout(crossfade, initialDelay);
   }
 
-  /* Nudge on refocus */
+  // Desktop: autoplay immediately
+  if (!window.LM.IS_MOBILE) {
+    vids.forEach(v => { try { v.play(); } catch(e){} });
+    startLoop(1200);
+  }
+
+  // Mobile: wait for Play tap
+  const playBtn = document.getElementById('play');
+  if (playBtn) playBtn.addEventListener('click', () => startLoop(BG.firstHoldAfterClickMs), { once: true });
+
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) playOnlyCurrentAndNext(i);
+    if (!document.hidden) {
+      if (loopStarted) playOnlyCurrentAndNext(i);
+      else if (!window.LM.IS_MOBILE) startLoop(0);
+    }
   }, {passive:true});
 })();
 </script>
 
 <!-- ===================== AUDIO ===================== -->
 <script>
+(() => {
 /* ======= Modes ======= */
-const BACKGROUND_MODE = 'pause'; // keep foreground-first
+const BACKGROUND_MODE = 'pause'; // set to 'full' if you want screen-off messages too
 
 /* Device heuristics */
-const AMBIENT_VIA_HTML = window.IS_MOBILE; // mobile uses <audio> to keep ambient rolling screen-off
+const AMBIENT_VIA_HTML = window.LM.IS_MOBILE; // mobile uses <audio> for ambient
 
 /* Latency */
-const AUDIO_LATENCY_HINT = window.IS_MOBILE ? 'playback' : 'interactive';
+const AUDIO_LATENCY_HINT = window.LM.IS_MOBILE ? 'playback' : 'interactive';
 
 /* Connection/CPU heuristics */
 const conn = navigator.connection || {};
 const HW = navigator.hardwareConcurrency || 4;
-const IS_LOW = window.IS_MOBILE &&
+const IS_LOW = window.LM.IS_MOBILE &&
                (conn.saveData || /^(2g|3g)$/i.test(conn.effectiveType || '') || HW <= 4);
 
 /* ======= Tunables ======= */
-const AUDIO_V        = 53;            // bump to force redownload if you replace audio
+const AUDIO_V        = 54;            // cache-bust for audio
 const MAX_MSG        = 154;           // number of message files
 const MSG_DELAY_MS   = 5000;          // 5s start after tap
 
@@ -280,9 +284,7 @@ const ambEl   = document.getElementById('ambEl');
 function hidePlayAnimated(){
   if (playBtn.classList.contains('hidden')) return;
   playBtn.classList.add('fade-out');
-  playBtn.addEventListener('transitionend', () => {
-    playBtn.classList.add('hidden');
-  }, { once: true });
+  playBtn.addEventListener('transitionend', () => { playBtn.classList.add('hidden'); }, { once: true });
 }
 function shuffle(a){ const r=a.slice(); for(let i=r.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1)); [r[i],r[j]]=[r[j],r[i]];} return r; }
 
@@ -509,6 +511,7 @@ playBtn.addEventListener('click', async () => {
     startAmbientWebAudio();
   }
 }, { once:true });
+})();
 </script>
 </body>
 </html>
