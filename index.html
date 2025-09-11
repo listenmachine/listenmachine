@@ -73,7 +73,8 @@
     transition: filter var(--title-fade-ms) linear, opacity var(--title-fade-ms) linear;
   }
 
-  .playbtn{
+  /* Shared button look */
+  .uibtn{
     position: fixed;
     left: 50%; top: 50%;
     transform: translate(-50%,-50%);
@@ -96,12 +97,23 @@
     isolation: isolate;
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
+
+    /* Animate blur + opacity like the title */
+    filter: blur(0px);
+    opacity: 1;
+    transition: filter var(--title-fade-ms) linear, opacity var(--title-fade-ms) linear;
   }
-  .playbtn:focus{ outline: none; }
+  .uibtn:focus{ outline: none; }
   .hidden{ display:none !important; }
+
+  /* Animation helpers */
+  .fade-out{ filter: blur(30px); opacity: 0; }
+  .fade-in { filter: blur(0px);  opacity: 1; }
 
   @media (prefers-reduced-motion: reduce){
     .bgvideo{ transition: none; }
+    .uibtn{ transition: none; }
+    #title{ transition: none; }
   }
   @media (pointer: coarse), (max-width: 820px){
     :root{ --bg-filter: saturate(0.98) contrast(0.94) brightness(1.08) blur(0.2px); }
@@ -124,8 +136,9 @@
   <h1 id="title">LISTENMACHINE</h1>
 </div>
 
-<!-- Play -->
-<button id="play" class="playbtn" type="button" aria-label="Play">PLAY</button>
+<!-- Buttons -->
+<button id="play" class="uibtn" type="button" aria-label="Play">PLAY</button>
+<button id="shuffle" class="uibtn fade-out hidden" type="button" aria-label="Shuffle playlist">SHUFFLE</button>
 
 <!-- Optional hidden sink (only used if BACKGROUND_MODE === 'full') -->
 <audio id="sink" preload="auto" playsinline></audio>
@@ -190,8 +203,6 @@ const BG = { displayMs: 5000, fadeMs: 55000, firstHoldAfterClickMs: 10000 };
 <!-- ===================== AUDIO (Web Audio, foreground-first, serial decode) ===================== -->
 <script>
 /* ======= Modes ======= */
-/* Foreground-first by default (smoothest desktop/open phones).
-   Set to 'full' to enable screen-locked playback via hidden <audio> sink. */
 const BACKGROUND_MODE = 'pause'; // 'pause' | 'full'
 
 /* Latency: snappy on desktop, larger buffer on mobile for smoothness */
@@ -208,7 +219,7 @@ const IS_LOW = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) &&
 /* ======= Tunables ======= */
 const AUDIO_V        = 50;            // bump to force redownload if you replace audio
 const MAX_MSG        = 154;           // number of message files
-const MSG_DELAY_MS   = 5000;          // start messages after tap
+const MSG_DELAY_MS   = 5000;          // start messages after tap (5s)
 
 /* Prefetch/decode horizons (adaptive) */
 const PREFETCH_AHEAD = IS_LOW ? 2 : 3;     // compressed bytes to fetch ahead
@@ -231,10 +242,24 @@ const messages = Array.from({length: MAX_MSG}, (_, i) => `audio/messages/${i+1}.
 const withV = url => url + (url.includes('?') ? '&' : '?') + 'v=' + AUDIO_V;
 
 /* Elements */
-const playBtn = document.getElementById('play');
-const sinkEl  = document.getElementById('sink');
-function showPlay(){ playBtn.classList.remove('hidden'); playBtn.disabled = false; }
-function hidePlay(){ playBtn.classList.add('hidden'); playBtn.disabled = true; }
+const playBtn    = document.getElementById('play');
+const shuffleBtn = document.getElementById('shuffle');
+const sinkEl     = document.getElementById('sink');
+function showPlay(){ playBtn.classList.remove('hidden'); playBtn.disabled = false; playBtn.classList.remove('fade-out'); }
+function hidePlayAnimated(){
+  if (playBtn.classList.contains('hidden')) return;
+  playBtn.classList.add('fade-out');
+  playBtn.addEventListener('transitionend', () => {
+    playBtn.classList.add('hidden');
+  }, { once: true });
+}
+function showShuffleAnimated(){
+  shuffleBtn.classList.remove('hidden');
+  // force reflow to ensure transition runs
+  void shuffleBtn.offsetWidth;
+  shuffleBtn.classList.remove('fade-out');
+  shuffleBtn.classList.add('fade-in');
+}
 function shuffle(a){ const r=a.slice(); for(let i=r.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1)); [r[i],r[j]]=[r[j],r[i]];} return r; }
 
 /* Web Audio graph */
@@ -423,10 +448,14 @@ playBtn.addEventListener('click', async () => {
   try { await ctx.resume(); } catch { showPlay(); return; }
   if (BACKGROUND_MODE === 'full'){ try { await sinkEl.play(); } catch { showPlay(); return; } }
 
-  hidePlay();
+  // Animate out: title + play
   const root = document.documentElement;
   root.style.setProperty('--title-blur', '30px');
   root.style.setProperty('--title-opacity', '0');
+  hidePlayAnimated();
+
+  // Animate in: shuffle (reverse effect)
+  showShuffleAnimated();
 
   // Message deck & initial schedule horizon
   msgDeck = shuffle(messages).map(u => u);
@@ -441,6 +470,14 @@ playBtn.addEventListener('click', async () => {
   if (ambient.length){ ambDeck = shuffle(ambient); playNextAmbient(); }
   loadAmbientList().then(() => { if (!ambNode){ ambDeck = shuffle(ambient); playNextAmbient(); } }).catch(()=>{});
 }, { once:true });
+
+/* Shuffle button: reshuffle remaining, audio-only */
+shuffleBtn.addEventListener('click', () => {
+  if (!ctx) return; // no-op until playback started
+  // Keep already scheduled/played items; reshuffle what's left in msgDeck
+  msgDeck = shuffle(msgDeck);
+  maintainAhead(); // update prefetch targets
+}, { passive: true });
 </script>
 </body>
 </html>
