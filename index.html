@@ -192,4 +192,322 @@ const BG = {
   }
 
   function crossfade(){
-    c
+    const cur = vids[i];
+    const nextIdx = (i + 1) % vids.length;
+    const next = vids[nextIdx];
+
+    try { next.play(); } catch(e){}
+    next.classList.add('show');
+    cur.classList.remove('show');
+
+    const prevIdx = i;
+    i = nextIdx;
+
+    /* After the overlap ends, pause the previous to save CPU/GPU */
+    setTimeout(() => {
+      try { vids[prevIdx].pause(); } catch(e){}
+      playOnlyCurrentAndNext(i);
+    }, BG.fadeMs + 60);
+
+    setTimeout(crossfade, BG.displayMs + BG.fadeMs);
+  }
+
+  /* When user taps Play, begin by playing only the first (and prepping the next) */
+  const playBtn = document.getElementById('play');
+  if (playBtn) {
+    playBtn.addEventListener('click', () => {
+      playOnlyCurrentAndNext(i);
+      setTimeout(crossfade, BG.firstHoldAfterClickMs);
+    }, { once: true });
+  }
+
+  /* If page regains focus, nudge playback */
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) playOnlyCurrentAndNext(i);
+  }, {passive:true});
+})();
+</script>
+
+<!-- ===================== AUDIO ===================== -->
+<script>
+/* ======= Modes ======= */
+const BACKGROUND_MODE = 'pause'; // keep foreground-first unless you want screen-off messages too
+
+/* Device heuristics */
+const IS_MOBILE = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+const AMBIENT_VIA_HTML = IS_MOBILE; // mobile uses <audio> to keep ambient rolling screen-off
+
+/* Latency */
+const AUDIO_LATENCY_HINT = IS_MOBILE ? 'playback' : 'interactive';
+
+/* Connection/CPU heuristics */
+const conn = navigator.connection || {};
+const HW = navigator.hardwareConcurrency || 4;
+const IS_LOW = IS_MOBILE &&
+               (conn.saveData || /^(2g|3g)$/i.test(conn.effectiveType || '') || HW <= 4);
+
+/* ======= Tunables ======= */
+const AUDIO_V        = 52;            // bump to force redownload if you replace audio
+const MAX_MSG        = 154;           // number of message files
+const MSG_DELAY_MS   = 5000;          // 5s start after tap
+
+/* Prefetch/decode horizons (adaptive) */
+const PREFETCH_AHEAD = IS_LOW ? 2 : 3;
+const DECODE_AHEAD   = IS_LOW ? 1 : 2;
+
+/* Timeouts */
+const MSG_TIMEOUT_MS = 5000;
+const BG_TIMEOUT_MS  = 12000;
+
+/* Scheduling */
+const SCHEDULE_LEAD_SEC = IS_LOW ? 0.6 : 0.4;
+const XFADE_SEC         = IS_LOW ? 0.00 : 0.02;
+
+/* Sources */
+const GH = { owner: "listenmachine", repo: "listenmachine", path: "audio/ambient" };
+const API_URL = `https://api.github.com/repos/${GH.owner}/${GH.repo}/contents/${GH.path}`;
+
+/* Message list */
+const messages = Array.from({length: MAX_MSG}, (_, i) => `audio/messages/${i+1}.mp3`);
+const withV = url => url + (url.includes('?') ? '&' : '?') + 'v=' + AUDIO_V;
+
+/* Elements */
+const playBtn = document.getElementById('play');
+const sinkEl  = document.getElementById('sink');
+const ambEl   = document.getElementById('ambEl');
+
+function hidePlayAnimated(){
+  if (playBtn.classList.contains('hidden')) return;
+  playBtn.classList.add('fade-out');
+  playBtn.addEventListener('transitionend', () => {
+    playBtn.classList.add('hidden');
+  }, { once: true });
+}
+function shuffle(a){ const r=a.slice(); for(let i=r.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1)); [r[i],r[j]]=[r[j],r[i]];} return r; }
+
+/* Web Audio graph */
+let ctx = null, masterGain = null, ambGain = null, msgGain = null, mediaDest = null;
+
+/* Decks */
+let msgDeck = [], ambDeck = [], ambient = [];
+
+/* Caches */
+const AB_LIMIT = IS_LOW ? 4 : 8;
+const msgABCache  = new Map();
+const msgBufCache = new Map();
+const abPending   = new Map();
+const bufPending  = new Map();
+
+/* Serial decode queue */
+let decodeTail = Promise.resolve();
+function queueDecode(work){ const p = decodeTail.then(work, work); decodeTail = p.catch(()=>{}); return p; }
+
+/* Scheduling */
+let msgScheduleTime = 0;
+let scheduledUrls   = [];
+let schedulingPaused = false;
+let ambNode = null;
+
+/* Fetch helpers */
+async function fetchAB(url, timeoutMs){
+  const u = withV(url);
+  const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try{
+    const res = await fetch(u, {mode:'cors', cache:'force-cache', signal: ctrl.signal});
+    if (!res.ok) throw new Error('HTTP '+res.status);
+    return await res.arrayBuffer();
+  } finally { clearTimeout(t); }
+}
+function getAB(url, timeoutMs){
+  if (msgABCache.has(url)) return Promise.resolve(msgABCache.get(url));
+  if (abPending.has(url))  return abPending.get(url);
+  const p = fetchAB(url, timeoutMs).then(ab => {
+    if (msgABCache.size >= AB_LIMIT){ const first = msgABCache.keys().next().value; msgABCache.delete(first); }
+    msgABCache.set(url, ab); abPending.delete(url); return ab;
+  }).catch(e => { abPending.delete(url); throw e; });
+  abPending.set(url, p); return p;
+}
+function decodeAB(ab, timeoutMs){
+  return new Promise((resolve, reject) => {
+    let done=false; const to=setTimeout(()=>{ if(!done) reject(new Error('decode timeout')); }, timeoutMs);
+    ctx.decodeAudioData(ab.slice(0), b=>{ done=true; clearTimeout(to); resolve(b); },
+                               e=>{ done=true; clearTimeout(to); reject(e); });
+  });
+}
+async function getDecoded(url, timeoutMs){
+  if (msgBufCache.has(url)) return msgBufCache.get(url);
+  if (bufPending.has(url))  return bufPending.get(url);
+  const p = (async () => {
+    const ab = await getAB(url, timeoutMs);
+    return queueDecode(() => decodeAB(ab, timeoutMs));
+  })().then(buf => { msgBufCache.set(url, buf); return buf; }).finally(()=> bufPending.delete(url));
+  bufPending.set(url, p); return p;
+}
+
+/* Maintain prefetch/decoded horizon */
+function maintainAhead(){
+  for (let i=0; i<Math.min(PREFETCH_AHEAD, msgDeck.length); i++){
+    const url = msgDeck[i]; getAB(url, BG_TIMEOUT_MS).catch(()=>{});
+  }
+  let need = DECODE_AHEAD;
+  for (let i=0; i<msgDeck.length && need>0; i++){
+    const url = msgDeck[i];
+    if (!scheduledUrls.includes(url) && !msgBufCache.has(url) && !bufPending.has(url)){
+      getDecoded(url, BG_TIMEOUT_MS).catch(()=>{});
+      need--;
+    }
+  }
+}
+
+/* Schedule decoded messages */
+function scheduleMessages(){
+  if (!ctx || schedulingPaused) return;
+  const now = ctx.currentTime;
+  while (msgDeck.length){
+    const nextUrl = msgDeck[0];
+    const buf = msgBufCache.get(nextUrl);
+    if (!buf) break;
+
+    const earliest = now + SCHEDULE_LEAD_SEC;
+    const startAt  = Math.max(msgScheduleTime, earliest);
+    const endAt    = startAt + buf.duration;
+
+    msgDeck.shift(); scheduledUrls.push(nextUrl);
+
+    const src = ctx.createBufferSource(); src.buffer = buf;
+    const g = ctx.createGain(); src.connect(g); g.connect(msgGain);
+
+    if (XFADE_SEC > 0){
+      g.gain.setValueAtTime(0, startAt);
+      g.gain.linearRampToValueAtTime(1, startAt + XFADE_SEC);
+      g.gain.setValueAtTime(1, endAt - XFADE_SEC);
+      g.gain.linearRampToValueAtTime(0, endAt);
+    } else {
+      g.gain.setValueAtTime(1, startAt);
+    }
+
+    try { src.start(startAt); } catch {}
+    msgScheduleTime = endAt + 0.01;
+
+    msgBufCache.delete(nextUrl);
+  }
+}
+
+/* Ambient (two paths) */
+async function playNextAmbientWebAudio(){
+  if (!ctx || !ambDeck.length) return;
+  const url = ambDeck.shift();
+  try{
+    const ab  = await fetchAB(url, BG_TIMEOUT_MS);
+    const buf = await queueDecode(() => decodeAB(ab, BG_TIMEOUT_MS));
+    const src = ctx.createBufferSource(); src.buffer = buf; src.connect(ambGain);
+    src.onended = () => { ambNode = null; playNextAmbientWebAudio(); };
+    const startAt = Math.max(ctx.currentTime + 0.2, 0);
+    src.start(startAt); ambNode = src;
+  }catch(_e){ playNextAmbientWebAudio(); }
+}
+function startAmbientWebAudio(){
+  if (ambient.length){ ambDeck = shuffle(ambient); playNextAmbientWebAudio(); }
+  loadAmbientList().then(() => { if (!ambNode && !AMBIENT_VIA_HTML){ ambDeck = shuffle(ambient); playNextAmbientWebAudio(); } }).catch(()=>{});
+}
+
+/* Mobile HTMLAudio (more robust screen-off) */
+function playNextAmbientHTML(){
+  if (!ambient.length){ return; }
+  if (!ambDeck.length){ ambDeck = shuffle(ambient); }
+  const url = withV(ambDeck.shift());
+  ambEl.src = url;
+  ambEl.load();
+  ambEl.volume = 1.0;
+  ambEl.play().catch(()=>{});
+}
+function startAmbientHTML(){
+  if (ambient.length){ ambDeck = shuffle(ambient); playNextAmbientHTML(); }
+  loadAmbientList().then(() => { if (AMBIENT_VIA_HTML && ambEl.paused){ ambDeck = shuffle(ambient); playNextAmbientHTML(); } }).catch(()=>{});
+  ambEl.onended = playNextAmbientHTML;
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { ambEl.play().catch(()=>{}); }
+  }, {passive:true});
+}
+
+/* Ambient list */
+async function loadAmbientList(){
+  try{
+    const r = await fetch(API_URL, { headers: { "Accept": "application/vnd.github+json" } });
+    if (!r.ok) throw new Error('Ambient list HTTP '+r.status);
+    const items = await r.json();
+    ambient = (Array.isArray(items) ? items : [])
+      .filter(it => it.type === "file" && /\.mp3$/i.test(it.name))
+      .map(it => it.download_url);
+  }catch(e){ console.warn('Ambient fetch failed:', e); ambient = []; }
+}
+
+/* Lifecycle resilience (messages) */
+async function tryResumeAndSchedule(){
+  if (!ctx) return;
+  if (ctx.state !== 'running'){
+    try { await ctx.resume(); } catch { return; }
+  }
+  maintainAhead(); scheduleMessages();
+}
+document.addEventListener('visibilitychange', async () => {
+  if (document.hidden && BACKGROUND_MODE === 'pause'){
+    schedulingPaused = true;
+  } else {
+    schedulingPaused = false;
+    tryResumeAndSchedule();
+  }
+}, {passive:true});
+window.addEventListener('pageshow', tryResumeAndSchedule, {passive:true});
+window.addEventListener('focus', tryResumeAndSchedule, {passive:true});
+
+/* Start on tap */
+playBtn.addEventListener('click', async () => {
+  playBtn.disabled = true;
+
+  if (!ctx){
+    ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: AUDIO_LATENCY_HINT });
+    masterGain = ctx.createGain(); masterGain.gain.value = 1.0;
+    ambGain    = ctx.createGain(); ambGain.gain.value = 1.0;
+    msgGain    = ctx.createGain(); msgGain.gain.value = 0.8;
+
+    if (BACKGROUND_MODE === 'full'){
+      mediaDest = ctx.createMediaStreamDestination();
+      ambGain.connect(masterGain); msgGain.connect(masterGain); masterGain.connect(mediaDest);
+      sinkEl.srcObject = mediaDest.stream;
+    } else {
+      ambGain.connect(masterGain); msgGain.connect(masterGain); masterGain.connect(ctx.destination);
+    }
+
+    if ('mediaSession' in navigator){
+      try { navigator.mediaSession.metadata = new MediaMetadata({ title: 'ListenMachine' }); } catch {}
+    }
+  }
+
+  try { await ctx.resume(); } catch { return; }
+
+  // Blur/fade title + play
+  const root = document.documentElement;
+  root.style.setProperty('--title-blur', '30px');
+  root.style.setProperty('--title-opacity', '0');
+  hidePlayAnimated();
+
+  // Build message deck & schedule start
+  msgDeck = shuffle(messages).map(u => u);
+  msgScheduleTime = ctx.currentTime + (MSG_DELAY_MS / 1000);
+
+  // Maintain + schedule
+  const maint = () => { maintainAhead(); scheduleMessages(); };
+  maint();
+  setInterval(maint, 2000);
+
+  // Ambient
+  if (AMBIENT_VIA_HTML){
+    startAmbientHTML();
+  } else {
+    startAmbientWebAudio();
+  }
+}, { once:true });
+</script>
+</body>
+</html>
