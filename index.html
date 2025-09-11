@@ -125,11 +125,12 @@
 <body>
 
 <!-- Background videos -->
-<video id="bgA" class="bgvideo show" muted loop playsinline autoplay preload="auto" src="media/Clouds4.mp4?v=20"></video>
-<video id="bgB" class="bgvideo"        muted loop playsinline autoplay preload="auto" src="media/Nightsky.mp4?v=20"></video>
-<video id="bgC" class="bgvideo"        muted loop playsinline autoplay preload="auto" src="media/Road2.mp4?v=20"></video>
-<video id="bgD" class="bgvideo"        muted loop playsinline autoplay preload="auto" src="media/Forest.mp4?v=20"></video>
-<video id="bgE" class="bgvideo"        muted loop playsinline autoplay preload="auto" src="media/Snow3.mp4?v=20"></video>
+<!-- Clouds loops on load; others idle until crossfade starts -->
+<video id="bgA" class="bgvideo show" muted loop playsinline autoplay preload="auto" src="media/Clouds4.mp4?v=21"></video>
+<video id="bgB" class="bgvideo"        muted loop playsinline preload="auto" src="media/Nightsky.mp4?v=21"></video>
+<video id="bgC" class="bgvideo"        muted loop playsinline preload="auto" src="media/Road2.mp4?v=21"></video>
+<video id="bgD" class="bgvideo"        muted loop playsinline preload="auto" src="media/Forest.mp4?v=21"></video>
+<video id="bgE" class="bgvideo"        muted loop playsinline preload="auto" src="media/Snow3.mp4?v=21"></video>
 
 <!-- Title -->
 <div class="title-wrap">
@@ -143,7 +144,7 @@
 <audio id="sink" preload="auto" playsinline></audio>   <!-- WebAudio sink if BACKGROUND_MODE='full' -->
 <audio id="ambEl" preload="auto" playsinline></audio>  <!-- Mobile ambient fallback -->
 
-<!-- One flag, once -->
+<!-- One namespace flag, once -->
 <script>
   window.LM = window.LM || {};
   window.LM.IS_MOBILE = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
@@ -172,7 +173,9 @@
 </script>
 
 <script>
-/* ===== BACKGROUND LOOP (desktop autoplay; mobile waits for tap) ===== */
+/* ===== BACKGROUND LOOP =====
+   Desktop: show/loop Clouds until PLAY, then start crossfade
+   Mobile: start crossfade after PLAY (saves battery/GPU) */
 (() => {
   const BG = {
     displayMs: window.LM.IS_MOBILE ? 7000  : 5000,
@@ -184,11 +187,10 @@
   let i = 0;
   let loopStarted = false;
 
+  function playOnly(idx){ vids.forEach((v,k)=>{ try{ k===idx ? v.play() : v.pause(); }catch(e){} }); }
   function playOnlyCurrentAndNext(idx){
     const nextIdx = (idx + 1) % vids.length;
-    vids.forEach((v, k) => {
-      try { (k === idx || k === nextIdx) ? v.play() : v.pause(); } catch(e){}
-    });
+    vids.forEach((v, k) => { try { (k === idx || k === nextIdx) ? v.play() : v.pause(); } catch(e){} });
   }
 
   function crossfade(){
@@ -214,20 +216,24 @@
     setTimeout(crossfade, initialDelay);
   }
 
-  // Desktop: autoplay immediately
+  const playBtn = document.getElementById('play');
+
+  // Desktop idle behavior: loop Clouds immediately, no crossfade yet
   if (!window.LM.IS_MOBILE) {
-    vids.forEach(v => { try { v.play(); } catch(e){} });
-    startLoop(1200);
+    playOnly(0); // keep Clouds looping
+    // Start crossfade only after PLAY
+    if (playBtn) playBtn.addEventListener('click', () => startLoop(BG.firstHoldAfterClickMs), { once: true });
+  } else {
+    // Mobile: wait for PLAY, then start crossfade
+    vids.forEach(v => { try{ v.pause(); }catch{} });
+    if (playBtn) playBtn.addEventListener('click', () => startLoop(BG.firstHoldAfterClickMs), { once: true });
   }
 
-  // Mobile: wait for Play tap
-  const playBtn = document.getElementById('play');
-  if (playBtn) playBtn.addEventListener('click', () => startLoop(BG.firstHoldAfterClickMs), { once: true });
-
+  // If the page regains focus, ensure expected video state
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
       if (loopStarted) playOnlyCurrentAndNext(i);
-      else if (!window.LM.IS_MOBILE) startLoop(0);
+      else if (!window.LM.IS_MOBILE) playOnly(0);
     }
   }, {passive:true});
 })();
@@ -252,7 +258,7 @@ const IS_LOW = window.LM.IS_MOBILE &&
                (conn.saveData || /^(2g|3g)$/i.test(conn.effectiveType || '') || HW <= 4);
 
 /* ======= Tunables ======= */
-const AUDIO_V        = 54;            // cache-bust for audio
+const AUDIO_V        = 55;            // cache-bust for audio
 const MAX_MSG        = 154;           // number of message files
 const MSG_DELAY_MS   = 5000;          // 5s start after tap
 
