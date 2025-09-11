@@ -6,7 +6,7 @@
 <title>ListenMachine</title>
 <meta name="color-scheme" content="dark light" />
 
-<!-- Preconnects for faster ambient list + raw audio fetch -->
+<!-- Preconnects for faster GitHub API/raw fetch -->
 <link rel="preconnect" href="https://api.github.com" crossorigin>
 <link rel="preconnect" href="https://raw.githubusercontent.com" crossorigin>
 
@@ -131,6 +131,9 @@
 <!-- Play -->
 <button id="play" class="playbtn" type="button" aria-label="Play">PLAY</button>
 
+<!-- Hidden audio sink for background-safe playback -->
+<audio id="sink" preload="auto" playsinline></audio>
+
 <script>
 /* -------- Auto-fit title to ONE line -------- */
 (function(){
@@ -188,98 +191,188 @@ const BG = { displayMs: 5000, fadeMs: 55000, firstHoldAfterClickMs: 10000 };
 })();
 </script>
 
-<!-- ===================== AUDIO (single Web Audio pipeline) ===================== -->
+<!-- ===================== AUDIO (Web Audio + background sink + predecode & preschedule) ===================== -->
 <script>
-/* Tunables */
-const MSG_DELAY_MS = 3000;     // start messages after tap
-const MSG_FETCH_MS = 5000;     // message fetch/decode timeout
-const AMB_FETCH_MS = 8000;     // ambient fetch/decode timeout
-const WATCHDOG_MS  = 5000;     // resume checks
-const AUDIO_V      = 41;       // bump when replacing files (cache-bust)
-const MAX_MSG      = 154;      // number of message files
+/* ==== Tunables ==== */
+const AUDIO_V        = 47;    // bump when replacing files (cache-bust)
+const MAX_MSG        = 154;   // number of message files
+const MSG_DELAY_MS   = 3000;  // start messages after tap
+const PREFETCH_AHEAD = 5;     // how many upcoming messages to prefetch (compressed bytes)
+const DECODE_AHEAD   = 2;     // how many to keep decoded ahead (for locked screen)
+const MSG_TIMEOUT_MS = 5000;  // hard timeout for immediate fetch/decode
+const BG_TIMEOUT_MS  = 12000; // background prefetch timeout
+const XFADE_SEC      = 0.04;  // tiny crossfade between messages (in seconds)
 
 /* Sources */
 const GH = { owner: "listenmachine", repo: "listenmachine", path: "audio/ambient" };
 const API_URL = `https://api.github.com/repos/${GH.owner}/${GH.repo}/contents/${GH.path}`;
 
 /* Build message list: 1..MAX_MSG */
-const messages = Array.from({length: MAX_MSG}, (_, i) => `audio/messages/${i+1}.mp3?v=${AUDIO_V}`);
+const messages = Array.from({length: MAX_MSG}, (_, i) => `audio/messages/${i+1}.mp3`);
 
-/* Ambient list is fetched at runtime from GitHub API (download_url -> raw.githubusercontent.com) */
+/* Ambient list is fetched at runtime from GitHub API (download_url) */
 let ambient = [];
 
 /* Utils */
 const $ = s => document.querySelector(s);
 const playBtn = $('#play');
+const sinkEl = $('#sink');
+
 function showPlay(){ playBtn.classList.remove('hidden'); playBtn.disabled = false; }
 function hidePlay(){ playBtn.classList.add('hidden'); playBtn.disabled = true; }
 function shuffle(a){ const r=a.slice(); for(let i=r.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1)); [r[i],r[j]]=[r[j],r[i]];} return r; }
+const withV = url => url + (url.includes('?') ? '&' : '?') + 'v=' + AUDIO_V;
 
-/* Web Audio setup (created on first tap) */
-let ctx = null, masterGain = null, ambGain = null, msgGain = null;
+/* Web Audio */
+let ctx = null, masterGain = null, ambGain = null, msgGain = null, mediaDest = null;
 
-/* Decks (no repeats per refresh) */
+/* Decks */
 let msgDeck = [], ambDeck = [];
 
-/* Current nodes for cleanup if needed */
-let ambNode = null, msgNode = null;
+/* Caches */
+const msgABCache   = new Map();      // url -> ArrayBuffer (compressed)
+const msgBufCache  = new Map();      // url -> AudioBuffer (decoded)
+const abPending    = new Map();      // url -> Promise<ArrayBuffer>
+const bufPending   = new Map();      // url -> Promise<AudioBuffer>
+const AB_LIMIT     = 8;              // keep up to 8 compressed files
 
-/* Fetch+decode with timeout */
-async function fetchDecode(url, timeoutMs){
-  const u = (url.includes('?') ? url + '&' : url + '?') + 'v=' + AUDIO_V;
+/* Scheduling state */
+let msgScheduleTime = 0;             // next scheduled start time (AudioContext time)
+let scheduledUrls   = [];            // URLs already scheduled (in order)
+
+/* Current ambient node */
+let ambNode = null;
+
+/* Fetch helpers */
+async function fetchAB(url, timeoutMs){
+  const u = withV(url);
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try{
     const res = await fetch(u, {mode:'cors', cache:'force-cache', signal: ctrl.signal});
     if (!res.ok) throw new Error('HTTP '+res.status);
-    const ab = await res.arrayBuffer();
-    return await new Promise((resolve, reject) => {
-      ctx.decodeAudioData(ab, resolve, reject);
-    });
+    return await res.arrayBuffer();
   } finally { clearTimeout(t); }
 }
 
-/* Ambient: play each once in random order */
-async function playNextAmbient(){
-  if (!ctx || ctx.state !== 'running') return;
-  if (!ambDeck.length) return; // done for this session
+function getAB(url, timeoutMs){
+  if (msgABCache.has(url)) return Promise.resolve(msgABCache.get(url));
+  if (abPending.has(url))  return abPending.get(url);
+  const p = fetchAB(url, timeoutMs).then(ab => {
+    if (msgABCache.size >= AB_LIMIT){
+      const firstKey = msgABCache.keys().next().value;
+      msgABCache.delete(firstKey);
+    }
+    msgABCache.set(url, ab);
+    abPending.delete(url);
+    return ab;
+  }).catch(e => { abPending.delete(url); throw e; });
+  abPending.set(url, p);
+  return p;
+}
 
+function decodeAB(ab, timeoutMs){
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const to = setTimeout(() => { if(!done) reject(new Error('decode timeout')); }, timeoutMs);
+    ctx.decodeAudioData(ab.slice(0), buf => { done=true; clearTimeout(to); resolve(buf); },
+                             err => { done=true; clearTimeout(to); reject(err); });
+  });
+}
+
+async function getDecoded(url, timeoutMs){
+  if (msgBufCache.has(url)) return msgBufCache.get(url);
+  if (bufPending.has(url))  return bufPending.get(url);
+  const p = getAB(url, timeoutMs).then(ab => decodeAB(ab, timeoutMs)).then(buf => {
+    msgBufCache.set(url, buf);
+    bufPending.delete(url);
+    return buf;
+  }).catch(e => { bufPending.delete(url); throw e; });
+  bufPending.set(url, p);
+  return p;
+}
+
+/* Prefetch & pre-decode ahead */
+function maintainAhead(){
+  // Prefetch compressed bytes
+  for (let i = 0; i < Math.min(PREFETCH_AHEAD, msgDeck.length); i++){
+    const url = msgDeck[i];
+    getAB(url, BG_TIMEOUT_MS).catch(()=>{});
+  }
+  // Pre-decode up to DECODE_AHEAD (but not already scheduled)
+  let need = DECODE_AHEAD;
+  for (let i = 0; i < msgDeck.length && need > 0; i++){
+    const url = msgDeck[i];
+    if (!scheduledUrls.includes(url) && !msgBufCache.has(url)){
+      getDecoded(url, BG_TIMEOUT_MS).catch(()=>{});
+      need--;
+    }
+  }
+}
+
+/* Schedule as many messages as possible (no timers needed while locked) */
+function scheduleMessages(){
+  while (msgDeck.length){
+    const nextUrl = msgDeck[0];
+    const buf = msgBufCache.get(nextUrl);
+    if (!buf) break; // wait until decoded
+
+    // Remove from deck; mark scheduled
+    msgDeck.shift();
+    scheduledUrls.push(nextUrl);
+
+    const src  = ctx.createBufferSource();
+    const g    = ctx.createGain();
+    src.buffer = buf;
+    src.connect(g);
+    g.connect(msgGain);
+
+    // Crossfade with previous message if overlapping
+    const startAt = Math.max(msgScheduleTime, ctx.currentTime + 0.02);
+    const endAt   = startAt + buf.duration;
+    const fade = XFADE_SEC;
+
+    // Fade in
+    g.gain.setValueAtTime(0, startAt);
+    g.gain.linearRampToValueAtTime(1, startAt + fade);
+
+    // Fade out
+    g.gain.setValueAtTime(1, endAt - fade);
+    g.gain.linearRampToValueAtTime(0, endAt);
+
+    src.start(startAt);
+
+    // Advance schedule time with tiny padding
+    msgScheduleTime = endAt + 0.01;
+
+    // Free decoded buffer once scheduled to keep memory steady
+    // (the source node holds an internal ref until it plays)
+    msgBufCache.delete(nextUrl);
+
+    // Keep the loop going to schedule more if we already have them decoded
+  }
+}
+
+/* Ambient playback (simple chain; optional to make it prescheduled too) */
+async function playNextAmbient(){
+  if (!ctx) return;
+  if (!ambDeck.length) return;
   const url = ambDeck.shift();
   try{
-    const buf = await fetchDecode(url, AMB_FETCH_MS);
-    if (!ctx || ctx.state !== 'running') return;
+    const ab  = await getAB(url, BG_TIMEOUT_MS);
+    const buf = await decodeAB(ab, BG_TIMEOUT_MS);
     ambNode = ctx.createBufferSource();
     ambNode.buffer = buf;
     ambNode.connect(ambGain);
     ambNode.onended = () => { ambNode = null; playNextAmbient(); };
-    ambNode.start(0);
-  } catch(e){
-    // Skip on error/timeouts
+    ambNode.start(Math.max(ctx.currentTime + 0.02, 0));
+  }catch(_e){
+    // skip on error
     playNextAmbient();
   }
 }
 
-/* Messages: sequential playback, skip after 5s fetch/decode failure */
-async function playNextMessage(){
-  if (!ctx || ctx.state !== 'running') return;
-  if (!msgDeck.length) return;
-
-  const url = msgDeck.shift();
-  try{
-    const buf = await fetchDecode(url, MSG_FETCH_MS);
-    if (!ctx || ctx.state !== 'running') return;
-    msgNode = ctx.createBufferSource();
-    msgNode.buffer = buf;
-    msgNode.connect(msgGain);
-    msgNode.onended = () => { msgNode = null; playNextMessage(); };
-    msgNode.start(0);
-  } catch(e){
-    // Skip quickly on error/timeouts
-    playNextMessage();
-  }
-}
-
-/* Load ambient list (non-blocking for messages) */
+/* Load ambient list */
 async function loadAmbientList(){
   try{
     const r = await fetch(API_URL, { headers: { "Accept": "application/vnd.github+json" } });
@@ -290,80 +383,90 @@ async function loadAmbientList(){
       .map(it => it.download_url);
   } catch(e){
     console.warn('Ambient fetch failed:', e);
-    ambient = []; // fine; messages still play
+    ambient = [];
   }
 }
 
-/* Start both pipelines after tap */
-async function startPlayback(){
-  // Make decks
-  msgDeck = shuffle(messages);
-  ambDeck = shuffle(ambient);
-
-  // Start messages after delay
-  setTimeout(() => { if (ctx.state === 'running') playNextMessage(); }, MSG_DELAY_MS);
-
-  // Start ambient (if we have any)
-  if (ambDeck.length) playNextAmbient();
-}
-
-/* Keep audio running across lifecycle quirks */
+/* Lifecycle resilience */
 function setupWatchdogs(){
-  const tryResume = () => {
+  const tryResume = async () => {
     if (!ctx) return;
     if (ctx.state !== 'running'){
-      ctx.resume().catch(() => showPlay());
+      try { await ctx.resume(); } catch { showPlay(); return; }
     }
+    // If we resumed, try to schedule any messages whose buffers are ready
+    scheduleMessages();
   };
   document.addEventListener('visibilitychange', () => { if (!document.hidden) tryResume(); }, {passive:true});
   window.addEventListener('pageshow', tryResume, {passive:true});
   window.addEventListener('focus', tryResume, {passive:true});
-  // periodic nudge
-  setInterval(tryResume, WATCHDOG_MS);
+  setInterval(tryResume, 5000);
 }
 
-/* Play button */
-playBtn.addEventListener('click', async () => {
+/* Start sequence on tap */
+document.getElementById('play').addEventListener('click', async () => {
   playBtn.disabled = true;
 
-  // Create audio graph inside the gesture
   if (!ctx){
     ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
-    masterGain = ctx.createGain(); masterGain.gain.value = 1.0; masterGain.connect(ctx.destination);
-    ambGain = ctx.createGain(); ambGain.gain.value = 1.0; ambGain.connect(masterGain);
-    msgGain = ctx.createGain(); msgGain.gain.value = 0.8; msgGain.connect(masterGain);
+    masterGain = ctx.createGain(); masterGain.gain.value = 1.0;
+    ambGain    = ctx.createGain(); ambGain.gain.value = 1.0;
+    msgGain    = ctx.createGain(); msgGain.gain.value = 0.8;
+
+    // Route to MediaStream -> hidden <audio> sink for background-safe playback
+    mediaDest = ctx.createMediaStreamDestination();
+    masterGain.connect(mediaDest);
+    ambGain.connect(masterGain);
+    msgGain.connect(masterGain);
+    const sink = document.getElementById('sink');
+    sink.srcObject = mediaDest.stream;
+
     setupWatchdogs();
+
     if ('mediaSession' in navigator){
-      try { navigator.mediaSession.metadata = new MediaMetadata({ title: 'ListenMachine' }); } catch {}
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({ title: 'ListenMachine' });
+        navigator.mediaSession.setActionHandler('play',  () => sink.play());
+        navigator.mediaSession.setActionHandler('pause', () => sink.pause());
+      } catch {}
     }
   }
 
-  // Ensure running
-  try { await ctx.resume(); } catch { showPlay(); return; }
+  try {
+    await ctx.resume();
+    await sinkEl.play();  // start the sink inside the gesture
+  } catch {
+    showPlay();
+    return;
+  }
 
-  // Hide UI and fade title once context is alive
   hidePlay();
   const root = document.documentElement;
   root.style.setProperty('--title-blur', '30px');
   root.style.setProperty('--title-opacity', '0');
 
-  // Start messages immediately (deck now), ambient after list fetch
-  msgDeck = shuffle(messages);
-  setTimeout(() => { if (ctx.state === 'running') playNextMessage(); }, MSG_DELAY_MS);
+  // Build message deck & scheduling horizon
+  msgDeck = shuffle(messages).map(u => u);        // clone
+  msgScheduleTime = ctx.currentTime + (MSG_DELAY_MS / 1000);
 
-  // Ambient: if we already had a list (from earlier session), use it; then refresh
+  // Prefetch & pre-decode some ahead, then schedule immediately if ready
+  maintainAhead();
+  scheduleMessages();
+
+  // Keep maintaining ahead in the background
+  const maint = () => { maintainAhead(); scheduleMessages(); };
+  const maintId = setInterval(maint, 1500); // light touch
+
+  // Ambient: use any cached list, then refresh
   if (ambient.length){
     ambDeck = shuffle(ambient);
     playNextAmbient();
   }
-  // Fetch latest ambient list; when ready, (re)start if nothing is playing
   loadAmbientList().then(() => {
     if (!ambNode){ ambDeck = shuffle(ambient); playNextAmbient(); }
-  }).catch(()=>{ /* messages still play even if this fails */ });
-}, { once: true });
+  }).catch(()=>{});
 
-/* Show Play again if the context ever gets closed (rare) */
-window.addEventListener('unload', () => { try{ ctx && ctx.close(); }catch{} });
+}, { once: true });
 </script>
 </body>
 </html>
