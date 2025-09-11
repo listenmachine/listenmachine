@@ -41,6 +41,9 @@
     filter: var(--bg-filter);
     opacity: 0;
     transition: opacity 20000ms linear;
+    will-change: opacity;
+    contain: paint;
+    backface-visibility: hidden;
   }
   .bgvideo.show{ opacity: 1; }
 
@@ -73,7 +76,7 @@
     transition: filter var(--title-fade-ms) linear, opacity var(--title-fade-ms) linear;
   }
 
-  /* Shared button look */
+  /* Play button (shares title blur/fade) */
   .uibtn{
     position: fixed;
     left: 50%; top: 50%;
@@ -98,50 +101,47 @@
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
 
-    /* Animate blur + opacity like the title */
     filter: blur(0px);
     opacity: 1;
     transition: filter var(--title-fade-ms) linear, opacity var(--title-fade-ms) linear;
   }
   .uibtn:focus{ outline: none; }
   .hidden{ display:none !important; }
-
-  /* Animation helpers */
   .fade-out{ filter: blur(30px); opacity: 0; }
-  .fade-in { filter: blur(0px);  opacity: 1; }
 
   @media (prefers-reduced-motion: reduce){
     .bgvideo{ transition: none; }
     .uibtn{ transition: none; }
     #title{ transition: none; }
   }
+
+  /* Mobile perf tweaks: remove filters & blend modes for cheaper compositing */
   @media (pointer: coarse), (max-width: 820px){
-    :root{ --bg-filter: saturate(0.98) contrast(0.94) brightness(1.08) blur(0.2px); }
+    :root{ --bg-filter: none; }
+    #title, .uibtn{ mix-blend-mode: normal; }
   }
 </style>
 </head>
 <body>
 
 <!-- Background videos -->
-<video id="bgA" class="bgvideo show" muted loop playsinline autoplay preload="auto">
-  <source src="media/Clouds4.mp4?v=16" type="video/mp4">
-</video>
-<video id="bgB" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Nightsky.mp4?v=16"></video>
-<video id="bgC" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Road2.mp4?v=16"></video>
-<video id="bgD" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Forest.mp4?v=16"></video>
-<video id="bgE" class="bgvideo" muted loop playsinline autoplay preload="auto" src="media/Snow3.mp4?v=16"></video>
+<video id="bgA" class="bgvideo show" muted loop playsinline preload="auto" src="media/Clouds4.mp4?v=17"></video>
+<video id="bgB" class="bgvideo"        muted loop playsinline preload="auto" src="media/Nightsky.mp4?v=17"></video>
+<video id="bgC" class="bgvideo"        muted loop playsinline preload="auto" src="media/Road2.mp4?v=17"></video>
+<video id="bgD" class="bgvideo"        muted loop playsinline preload="auto" src="media/Forest.mp4?v=17"></video>
+<video id="bgE" class="bgvideo"        muted loop playsinline preload="auto" src="media/Snow3.mp4?v=17"></video>
 
 <!-- Title -->
 <div class="title-wrap">
   <h1 id="title">LISTENMACHINE</h1>
 </div>
 
-<!-- Buttons -->
+<!-- Play -->
 <button id="play" class="uibtn" type="button" aria-label="Play">PLAY</button>
-<button id="shuffle" class="uibtn fade-out hidden" type="button" aria-label="Shuffle playlist">SHUFFLE</button>
 
-<!-- Optional hidden sink (only used if BACKGROUND_MODE === 'full') -->
-<audio id="sink" preload="auto" playsinline></audio>
+<!-- Audio sinks -->
+<audio id="sink" preload="auto" playsinline></audio>   <!-- WebAudio sink (unused unless BACKGROUND_MODE='full') -->
+<audio id="ambEl" preload="auto" playsinline></audio>  <!-- Mobile ambient fallback -->
 
 <script>
 /* -------- Auto-fit title to ONE line -------- */
@@ -166,318 +166,30 @@
 </script>
 
 <script>
-/* ===== BACKGROUND CROSSFADE (Clouds → Nightsky → Road → Forest → Snow → Clouds) ===== */
-const BG = { displayMs: 5000, fadeMs: 55000, firstHoldAfterClickMs: 10000 };
+/* ===== BACKGROUND LOOP with mobile perf optimizations ===== */
+const IS_MOBILE = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+
+/* Shorter overlap on mobile, keep your long dissolve on desktop */
+const BG = {
+  displayMs: IS_MOBILE ? 7000  : 5000,
+  fadeMs:    IS_MOBILE ? 9000  : 55000,
+  firstHoldAfterClickMs: 10000
+};
 
 (function setupBackgroundLoop(){
   const vids = ['bgA','bgB','bgC','bgD','bgE'].map(id => document.getElementById(id));
-  vids.forEach(v => {
-    v.style.transitionDuration = BG.fadeMs + 'ms';
-    const tryPlay = () => { try { v.play(); } catch(e){} };
-    if (v.readyState >= 2) tryPlay();
-    else v.addEventListener('canplay', tryPlay, { once: true });
-  });
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) vids.forEach(v => { try { v.play(); } catch(e){} });
-  });
+
+  /* Play only the current and next videos; pause the rest */
   let i = 0;
+  function playOnlyCurrentAndNext(idx){
+    const nextIdx = (idx + 1) % vids.length;
+    vids.forEach((v, k) => {
+      try {
+        if (k === idx || k === nextIdx) { v.play(); }
+        else { v.pause(); }
+      } catch(e){}
+    });
+  }
+
   function crossfade(){
-    const cur = vids[i];
-    const next = vids[(i + 1) % vids.length];
-    try { if (next.readyState >= 2) next.play(); } catch(e){}
-    next.classList.add('show');
-    cur.classList.remove('show');
-    i = (i + 1) % vids.length;
-    setTimeout(crossfade, BG.displayMs + BG.fadeMs);
-  }
-  const playBtn = document.getElementById('play');
-  if (playBtn) {
-    playBtn.addEventListener('click', () => {
-      vids.forEach(v => { try { v.play(); } catch(e){} });
-      setTimeout(crossfade, BG.firstHoldAfterClickMs);
-    }, { once: true });
-  }
-})();
-</script>
-
-<!-- ===================== AUDIO (Web Audio, foreground-first, serial decode) ===================== -->
-<script>
-/* ======= Modes ======= */
-const BACKGROUND_MODE = 'pause'; // 'pause' | 'full'
-
-/* Latency: snappy on desktop, larger buffer on mobile for smoothness */
-const AUDIO_LATENCY_HINT = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)
-  ? 'playback'
-  : 'interactive';
-
-/* Connection/CPU heuristics */
-const conn = navigator.connection || {};
-const HW = navigator.hardwareConcurrency || 4;
-const IS_LOW = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) &&
-               (conn.saveData || /^(2g|3g)$/i.test(conn.effectiveType || '') || HW <= 4);
-
-/* ======= Tunables ======= */
-const AUDIO_V        = 50;            // bump to force redownload if you replace audio
-const MAX_MSG        = 154;           // number of message files
-const MSG_DELAY_MS   = 5000;          // start messages after tap (5s)
-
-/* Prefetch/decode horizons (adaptive) */
-const PREFETCH_AHEAD = IS_LOW ? 2 : 3;     // compressed bytes to fetch ahead
-const DECODE_AHEAD   = IS_LOW ? 1 : 2;     // decoded buffers kept ready
-
-/* Timeouts */
-const MSG_TIMEOUT_MS = 5000;          // immediate fetch/decode cap
-const BG_TIMEOUT_MS  = 12000;         // background prefetch cap
-
-/* Scheduling */
-const SCHEDULE_LEAD_SEC = IS_LOW ? 0.6 : 0.4;  // schedule starts this far ahead
-const XFADE_SEC         = IS_LOW ? 0.00 : 0.02; // tiny crossfade (0 on low-end)
-
-/* Sources */
-const GH = { owner: "listenmachine", repo: "listenmachine", path: "audio/ambient" };
-const API_URL = `https://api.github.com/repos/${GH.owner}/${GH.repo}/contents/${GH.path}`;
-
-/* Build message list: 1..MAX_MSG */
-const messages = Array.from({length: MAX_MSG}, (_, i) => `audio/messages/${i+1}.mp3`);
-const withV = url => url + (url.includes('?') ? '&' : '?') + 'v=' + AUDIO_V;
-
-/* Elements */
-const playBtn    = document.getElementById('play');
-const shuffleBtn = document.getElementById('shuffle');
-const sinkEl     = document.getElementById('sink');
-function showPlay(){ playBtn.classList.remove('hidden'); playBtn.disabled = false; playBtn.classList.remove('fade-out'); }
-function hidePlayAnimated(){
-  if (playBtn.classList.contains('hidden')) return;
-  playBtn.classList.add('fade-out');
-  playBtn.addEventListener('transitionend', () => {
-    playBtn.classList.add('hidden');
-  }, { once: true });
-}
-function showShuffleAnimated(){
-  shuffleBtn.classList.remove('hidden');
-  // force reflow to ensure transition runs
-  void shuffleBtn.offsetWidth;
-  shuffleBtn.classList.remove('fade-out');
-  shuffleBtn.classList.add('fade-in');
-}
-function shuffle(a){ const r=a.slice(); for(let i=r.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1)); [r[i],r[j]]=[r[j],r[i]];} return r; }
-
-/* Web Audio graph */
-let ctx = null, masterGain = null, ambGain = null, msgGain = null, mediaDest = null;
-
-/* Decks */
-let msgDeck = [], ambDeck = [], ambient = [];
-
-/* Caches */
-const AB_LIMIT = IS_LOW ? 4 : 8;
-const msgABCache  = new Map();   // url -> ArrayBuffer (compressed)
-const msgBufCache = new Map();   // url -> AudioBuffer (decoded)
-const abPending   = new Map();   // url -> Promise<ArrayBuffer>
-const bufPending  = new Map();   // url -> Promise<AudioBuffer>
-
-/* Serial decode queue (avoid CPU spikes) */
-let decodeTail = Promise.resolve();
-function queueDecode(work){ const p = decodeTail.then(work, work); decodeTail = p.catch(()=>{}); return p; }
-
-/* Scheduling */
-let msgScheduleTime = 0;         // AudioContext time for next start
-let scheduledUrls   = [];        // track scheduled items
-let schedulingPaused = false;    // pause while hidden in 'pause' mode
-let ambNode = null;
-
-/* Fetch helpers */
-async function fetchAB(url, timeoutMs){
-  const u = withV(url);
-  const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), timeoutMs);
-  try{
-    const res = await fetch(u, {mode:'cors', cache:'force-cache', signal: ctrl.signal});
-    if (!res.ok) throw new Error('HTTP '+res.status);
-    return await res.arrayBuffer();
-  } finally { clearTimeout(t); }
-}
-function getAB(url, timeoutMs){
-  if (msgABCache.has(url)) return Promise.resolve(msgABCache.get(url));
-  if (abPending.has(url))  return abPending.get(url);
-  const p = fetchAB(url, timeoutMs).then(ab => {
-    // FIFO cap
-    if (msgABCache.size >= AB_LIMIT){ const first = msgABCache.keys().next().value; msgABCache.delete(first); }
-    msgABCache.set(url, ab); abPending.delete(url); return ab;
-  }).catch(e => { abPending.delete(url); throw e; });
-  abPending.set(url, p); return p;
-}
-function decodeAB(ab, timeoutMs){
-  return new Promise((resolve, reject) => {
-    let done=false; const to=setTimeout(()=>{ if(!done) reject(new Error('decode timeout')); }, timeoutMs);
-    ctx.decodeAudioData(ab.slice(0), b=>{ done=true; clearTimeout(to); resolve(b); },
-                               e=>{ done=true; clearTimeout(to); reject(e); });
-  });
-}
-async function getDecoded(url, timeoutMs){
-  if (msgBufCache.has(url)) return msgBufCache.get(url);
-  if (bufPending.has(url))  return bufPending.get(url);
-  const p = (async () => {
-    const ab = await getAB(url, timeoutMs);
-    return queueDecode(() => decodeAB(ab, timeoutMs));
-  })().then(buf => { msgBufCache.set(url, buf); return buf; }).finally(()=> bufPending.delete(url));
-  bufPending.set(url, p); return p;
-}
-
-/* Maintain prefetch/decoded horizon */
-function maintainAhead(){
-  // compressed prefetch
-  for (let i=0; i<Math.min(PREFETCH_AHEAD, msgDeck.length); i++){
-    const url = msgDeck[i]; getAB(url, BG_TIMEOUT_MS).catch(()=>{});
-  }
-  // decoded buffers
-  let need = DECODE_AHEAD;
-  for (let i=0; i<msgDeck.length && need>0; i++){
-    const url = msgDeck[i];
-    if (!scheduledUrls.includes(url) && !msgBufCache.has(url) && !bufPending.has(url)){
-      getDecoded(url, BG_TIMEOUT_MS).catch(()=>{});
-      need--;
-    }
-  }
-}
-
-/* Schedule decoded messages (no timers needed during playback) */
-function scheduleMessages(){
-  if (!ctx || schedulingPaused) return;
-  const now = ctx.currentTime;
-  while (msgDeck.length){
-    const nextUrl = msgDeck[0];
-    const buf = msgBufCache.get(nextUrl);
-    if (!buf) break;
-
-    const earliest = now + SCHEDULE_LEAD_SEC;
-    const startAt  = Math.max(msgScheduleTime, earliest);
-    const endAt    = startAt + buf.duration;
-
-    // remove + mark
-    msgDeck.shift(); scheduledUrls.push(nextUrl);
-
-    const src = ctx.createBufferSource(); src.buffer = buf;
-    const g = ctx.createGain(); src.connect(g); g.connect(msgGain);
-
-    if (XFADE_SEC > 0){
-      g.gain.setValueAtTime(0, startAt);
-      g.gain.linearRampToValueAtTime(1, startAt + XFADE_SEC);
-      g.gain.setValueAtTime(1, endAt - XFADE_SEC);
-      g.gain.linearRampToValueAtTime(0, endAt);
-    } else {
-      g.gain.setValueAtTime(1, startAt);
-    }
-
-    try { src.start(startAt); } catch {}
-    msgScheduleTime = endAt + 0.01;
-
-    // free decoded buffer (source retains internal ref)
-    msgBufCache.delete(nextUrl);
-  }
-}
-
-/* Ambient (shares decode queue to avoid contention) */
-async function playNextAmbient(){
-  if (!ctx || !ambDeck.length) return;
-  const url = ambDeck.shift();
-  try{
-    const ab  = await getAB(url, BG_TIMEOUT_MS);
-    const buf = await queueDecode(() => decodeAB(ab, BG_TIMEOUT_MS));
-    const src = ctx.createBufferSource(); src.buffer = buf; src.connect(ambGain);
-    src.onended = () => { ambNode = null; playNextAmbient(); };
-    const startAt = Math.max(ctx.currentTime + 0.2, 0);
-    src.start(startAt); ambNode = src;
-  }catch(_e){ playNextAmbient(); }
-}
-
-/* Ambient list */
-async function loadAmbientList(){
-  try{
-    const r = await fetch(API_URL, { headers: { "Accept": "application/vnd.github+json" } });
-    if (!r.ok) throw new Error('Ambient list HTTP '+r.status);
-    const items = await r.json();
-    ambient = (Array.isArray(items) ? items : [])
-      .filter(it => it.type === "file" && /\.mp3$/i.test(it.name))
-      .map(it => it.download_url);
-  }catch(e){ console.warn('Ambient fetch failed:', e); ambient = []; }
-}
-
-/* Lifecycle resilience */
-async function tryResumeAndSchedule(){
-  if (!ctx) return;
-  if (ctx.state !== 'running'){
-    try { await ctx.resume(); } catch { showPlay(); return; }
-  }
-  maintainAhead(); scheduleMessages();
-}
-document.addEventListener('visibilitychange', async () => {
-  if (document.hidden && BACKGROUND_MODE === 'pause'){
-    schedulingPaused = true;       // stop scheduling while hidden
-  } else {
-    schedulingPaused = false;      // resume on return
-    tryResumeAndSchedule();
-  }
-}, {passive:true});
-window.addEventListener('pageshow', tryResumeAndSchedule, {passive:true});
-window.addEventListener('focus', tryResumeAndSchedule, {passive:true});
-
-/* Start on tap */
-playBtn.addEventListener('click', async () => {
-  playBtn.disabled = true;
-
-  if (!ctx){
-    ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: AUDIO_LATENCY_HINT });
-    masterGain = ctx.createGain(); masterGain.gain.value = 1.0;
-    ambGain    = ctx.createGain(); ambGain.gain.value = 1.0;
-    msgGain    = ctx.createGain(); msgGain.gain.value = 0.8;
-
-    if (BACKGROUND_MODE === 'full'){
-      // Route graph to hidden <audio> sink for screen-locked playback
-      mediaDest = ctx.createMediaStreamDestination();
-      ambGain.connect(masterGain); msgGain.connect(masterGain); masterGain.connect(mediaDest);
-      sinkEl.srcObject = mediaDest.stream;
-    } else {
-      // Foreground-first: direct to device
-      ambGain.connect(masterGain); msgGain.connect(masterGain); masterGain.connect(ctx.destination);
-    }
-
-    if ('mediaSession' in navigator){
-      try { navigator.mediaSession.metadata = new MediaMetadata({ title: 'ListenMachine' }); } catch {}
-    }
-  }
-
-  try { await ctx.resume(); } catch { showPlay(); return; }
-  if (BACKGROUND_MODE === 'full'){ try { await sinkEl.play(); } catch { showPlay(); return; } }
-
-  // Animate out: title + play
-  const root = document.documentElement;
-  root.style.setProperty('--title-blur', '30px');
-  root.style.setProperty('--title-opacity', '0');
-  hidePlayAnimated();
-
-  // Animate in: shuffle (reverse effect)
-  showShuffleAnimated();
-
-  // Message deck & initial schedule horizon
-  msgDeck = shuffle(messages).map(u => u);
-  msgScheduleTime = ctx.currentTime + (MSG_DELAY_MS / 1000);
-
-  // Maintain + schedule in a light loop
-  const maint = () => { maintainAhead(); scheduleMessages(); };
-  maint();
-  setInterval(maint, 2000);
-
-  // Ambient: use any cached list, then refresh
-  if (ambient.length){ ambDeck = shuffle(ambient); playNextAmbient(); }
-  loadAmbientList().then(() => { if (!ambNode){ ambDeck = shuffle(ambient); playNextAmbient(); } }).catch(()=>{});
-}, { once:true });
-
-/* Shuffle button: reshuffle remaining, audio-only */
-shuffleBtn.addEventListener('click', () => {
-  if (!ctx) return; // no-op until playback started
-  // Keep already scheduled/played items; reshuffle what's left in msgDeck
-  msgDeck = shuffle(msgDeck);
-  maintainAhead(); // update prefetch targets
-}, { passive: true });
-</script>
-</body>
-</html>
+    c
