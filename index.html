@@ -20,7 +20,7 @@
     --title-opacity: 1;
     --title-fade-ms: 20000ms;
     --bg-filter: saturate(0.95) contrast(0.96) brightness(1.06) blur(0px);
-    /* NEW: tie video transition to JS-configured fade to avoid decoder overlap */
+    /* tie video transition to JS-configured fade to avoid decoder overlap */
     --bg-fade-ms: 20000ms;
   }
 
@@ -44,7 +44,7 @@
     background:#000;
     filter: var(--bg-filter);
     opacity: 0;
-    transition: opacity var(--bg-fade-ms) linear; /* was hard-coded 20000ms */
+    transition: opacity var(--bg-fade-ms) linear;
     will-change: opacity;
     contain: paint;
     backface-visibility: hidden;
@@ -180,7 +180,7 @@
   // Tunables
   const BG = {
     displayMs: window.LM.IS_MOBILE ? 7000  : 5000,
-    fadeMs:    window.LM.IS_MOBILE ? 9000  : 55000, // visual design unchanged
+    fadeMs:    window.LM.IS_MOBILE ? 9000  : 55000, // long desktop crossfade
     firstHoldAfterClickMs: 10000
   };
 
@@ -192,7 +192,7 @@
     document.documentElement.style.setProperty('--bg-filter', 'none');
   }
 
-  // NEW: keep CSS transition in lockstep with JS fade length
+  // Keep CSS transition in lockstep with JS fade length
   document.documentElement.style.setProperty('--bg-fade-ms', BG.fadeMs + 'ms');
 
   const vids = ['bgA','bgB','bgC','bgD','bgE'].map(id => document.getElementById(id));
@@ -208,8 +208,7 @@
   // Pre-arm the next video a moment before the crossfade to avoid a cold start
   function warmNext(next){
     try {
-      if (next.preload !== 'auto') next.preload = 'auto'; // was metadata
-      // Kicks off buffering without flashing a frame
+      if (next.preload !== 'auto') next.preload = 'auto';
       next.load();
     } catch(e){}
   }
@@ -219,7 +218,7 @@
     const nextIdx = (i + 1) % vids.length;
     const next = vids[nextIdx];
 
-    warmNext(next);         // just-in-time buffer
+    warmNext(next);
     try { next.play(); } catch(e) {}
     next.classList.add('show');
     cur.classList.remove('show');
@@ -227,7 +226,7 @@
     const prevIdx = i;
     i = nextIdx;
 
-    // Pause the previous as soon as its fade truly completes (now matches CSS)
+    // Pause the previous as soon as its fade completes
     setTimeout(() => { try{ vids[prevIdx].pause(); }catch{} playOnlyCurrentAndNext(i); }, BG.fadeMs + 40);
 
     // Schedule the next crossfade cycle
@@ -260,11 +259,12 @@
 })();
 </script>
 
-<!-- ===================== AUDIO (unchanged) ===================== -->
+<!-- ===================== AUDIO ===================== -->
 <script>
 (() => {
 /* ======= Modes ======= */
-const BACKGROUND_MODE = 'pause';
+/* Desktop keeps playing in background; mobile saves battery */
+const BACKGROUND_MODE = window.LM.IS_MOBILE ? 'pause' : 'full';
 
 /* Device heuristics */
 const AMBIENT_VIA_HTML = window.LM.IS_MOBILE;
@@ -285,7 +285,8 @@ const MSG_DELAY_MS   = 6000;
 
 /* Prefetch/decode horizons (adaptive) */
 const PREFETCH_AHEAD = IS_LOW ? 2 : 3;
-const DECODE_AHEAD   = IS_LOW ? 1 : 2;
+/* bump desktop decode horizon for timer-throttle resilience */
+const DECODE_AHEAD   = IS_LOW ? 1 : (window.LM.IS_MOBILE ? 2 : 4);
 
 /* Timeouts */
 const MSG_TIMEOUT_MS = 5000;
@@ -480,8 +481,10 @@ async function tryResumeAndSchedule(){
   }
   maintainAhead(); scheduleMessages();
 }
+
+/* Only pause scheduling in background on MOBILE */
 document.addEventListener('visibilitychange', async () => {
-  if (document.hidden && BACKGROUND_MODE === 'pause'){
+  if (document.hidden && window.LM.IS_MOBILE && BACKGROUND_MODE === 'pause'){
     schedulingPaused = true;
   } else {
     schedulingPaused = false;
@@ -502,6 +505,7 @@ playBtn.addEventListener('click', async () => {
     msgGain    = ctx.createGain(); msgGain.gain.value = 0.8;
 
     if (BACKGROUND_MODE === 'full'){
+      /* Route audio through a MediaStream so a real <audio> element can keep it alive in bg */
       mediaDest = ctx.createMediaStreamDestination();
       ambGain.connect(masterGain); msgGain.connect(masterGain); masterGain.connect(mediaDest);
       sinkEl.srcObject = mediaDest.stream;
@@ -515,6 +519,9 @@ playBtn.addEventListener('click', async () => {
   }
 
   try { await ctx.resume(); } catch { return; }
+
+  /* Ensure the sink actually plays in FULL mode (Firefox background keep-alive) */
+  if (BACKGROUND_MODE === 'full') { try { await sinkEl.play(); } catch(e) {} }
 
   // Blur/fade title + play
   const root = document.documentElement;
@@ -537,6 +544,11 @@ playBtn.addEventListener('click', async () => {
   } else {
     startAmbientWebAudio();
   }
+
+  /* Soft watchdog: if FF suspends the context in bg, nudge it */
+  setInterval(() => {
+    if (ctx && ctx.state !== 'running') { ctx.resume().catch(()=>{}); }
+  }, 15000);
 }, { once:true });
 })();
 </script>
