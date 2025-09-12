@@ -20,7 +20,7 @@
     --title-opacity: 1;
     --title-fade-ms: 20000ms;
     --bg-filter: saturate(0.95) contrast(0.96) brightness(1.06) blur(0px);
-    /* tie video transition to JS-configured fade to avoid decoder overlap */
+    /* tied to JS so CSS/JS fade stay in sync */
     --bg-fade-ms: 20000ms;
   }
 
@@ -213,6 +213,55 @@
     } catch(e){}
   }
 
+  // --- NEW: wake helpers for Firefox frozen frames ---
+  function wakeVideos(){
+    const cur = vids[i];
+    const nxt = vids[(i + 1) % vids.length];
+    [cur, nxt].forEach(v => {
+      try{
+        const t = v.currentTime || 0;
+        v.currentTime = Math.max(0, t + 0.001);   // tiny seek to force fresh frame
+        const p = v.play();
+        if (p && p.catch) p.catch(()=>{});
+      }catch(_e){}
+    });
+  }
+  function watchVideo(v){
+    let lastT = -1, stuckTicks = 0;
+    function tick(){
+      try{
+        if (!v.paused && v.readyState >= 2){
+          const t = v.currentTime;
+          if (t === lastT){
+            stuckTicks++;
+            if (stuckTicks >= 60){        // ~1s at 60Hz
+              v.currentTime = t + 0.001;  // nudge timeline
+              v.play().catch(()=>{});
+              stuckTicks = 0;
+            }
+          } else {
+            stuckTicks = 0;
+            lastT = t;
+          }
+        } else {
+          stuckTicks = 0;
+        }
+      }catch(_e){}
+      if ('requestVideoFrameCallback' in v){
+        v.requestVideoFrameCallback(() => tick());
+      } else {
+        setTimeout(tick, 33);
+      }
+    }
+    if ('requestVideoFrameCallback' in v){
+      v.requestVideoFrameCallback(() => tick());
+    } else {
+      setTimeout(tick, 200);
+    }
+  }
+  vids.forEach(watchVideo);
+  // --- end NEW ---
+
   function crossfade(){
     const cur = vids[i];
     const nextIdx = (i + 1) % vids.length;
@@ -250,10 +299,18 @@
     if (playBtn) playBtn.addEventListener('click', () => startLoop(BG.firstHoldAfterClickMs), { once: true });
   }
 
+  // Replace visibility handler: assert correct layer, resume play, and wake frames
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
-      if (loopStarted) playOnlyCurrentAndNext(i);
-      else if (!window.LM.IS_MOBILE) playOnly(0);
+      if (loopStarted){
+        vids.forEach((v, k) => v.classList.toggle('show', k === i));
+        playOnlyCurrentAndNext(i);
+        wakeVideos(); // force a fresh frame on resume
+      } else if (!window.LM.IS_MOBILE) {
+        playOnly(0);
+        vids.forEach((v, k) => v.classList.toggle('show', k === 0));
+        wakeVideos();
+      }
     }
   }, {passive:true});
 })();
