@@ -345,17 +345,10 @@ const PREFETCH_AHEAD = IS_LOW ? 2 : 3;
 /* bump desktop/mobile decode horizon for timer-throttle resilience */
 const DECODE_AHEAD   = IS_LOW ? 1 : 4;
 
-/* Timeouts */
-const MSG_TIMEOUT_MS = 5000;
-const BG_TIMEOUT_MS  = 12000;
-
-/* Scheduling */
-const SCHEDULE_LEAD_SEC = IS_LOW ? 0.6 : 0.4;
-const XFADE_SEC         = IS_LOW ? 0.00 : 0.02;
-
-/* Sources */
-const GH = { owner: "listenmachine", repo: "listenmachine", path: "audio/ambient" };
-const API_URL = `https://api.github.com/repos/${GH.owner}/${GH.repo}/contents/${GH.path}`;
+/* Timeouts (more generous for private/incognito and slow nets) */
+const NET_SLOW = /^(2g|3g)$/i.test(conn.effectiveType || '');
+const FETCH_TIMEOUT_MS  = NET_SLOW ? 70000 : 45000;
+const DECODE_TIMEOUT_MS = 20000;
 
 /* Message list */
 const messages = Array.from({length: MAX_MSG}, (_, i) => `audio/messages/${i+1}.mp3`);
@@ -386,6 +379,18 @@ const msgBufCache = new Map();
 const abPending   = new Map();
 const bufPending  = new Map();
 
+/* Failure tracking (rotate stubborn files) */
+const failCount = new Map();
+function bumpFailure(url){
+  const n = (failCount.get(url) || 0) + 1;
+  failCount.set(url, n);
+  if (n >= 3){
+    const idx = msgDeck.indexOf(url);
+    if (idx > -1){ msgDeck.splice(idx,1); msgDeck.push(url); }
+    failCount.set(url, 0);
+  }
+}
+
 /* Serial decode queue */
 let decodeTail = Promise.resolve();
 function queueDecode(work){ const p = decodeTail.then(work, work); decodeTail = p.catch(()=>{}); return p; }
@@ -397,74 +402,82 @@ let schedulingPaused = false;
 let ambNode = null;
 
 /* Fetch helpers */
-async function fetchAB(url, timeoutMs){
+async function fetchAB(url, timeoutMs = FETCH_TIMEOUT_MS){
   const u = withV(url);
   const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try{
-    const res = await fetch(u, {mode:'cors', cache:'force-cache', signal: ctrl.signal});
+    const res = await fetch(u, {mode:'cors', cache:'default', signal: ctrl.signal});
     if (!res.ok) throw new Error('HTTP '+res.status);
     return await res.arrayBuffer();
   } finally { clearTimeout(t); }
 }
-function getAB(url, timeoutMs){
+function getAB(url, timeoutMs = FETCH_TIMEOUT_MS){
   if (msgABCache.has(url)) return Promise.resolve(msgABCache.get(url));
   if (abPending.has(url))  return abPending.get(url);
   const p = fetchAB(url, timeoutMs).then(ab => {
     if (msgABCache.size >= AB_LIMIT){ const first = msgABCache.keys().next().value; msgABCache.delete(first); }
     msgABCache.set(url, ab); abPending.delete(url); return ab;
-  }).catch(e => { abPending.delete(url); throw e; });
+  }).catch(e => { abPending.delete(url); bumpFailure(url); throw e; });
   abPending.set(url, p); return p;
 }
-function decodeAB(ab, timeoutMs){
+function decodeAB(ab, timeoutMs = DECODE_TIMEOUT_MS){
   return new Promise((resolve, reject) => {
     let done=false; const to=setTimeout(()=>{ if(!done) reject(new Error('decode timeout')); }, timeoutMs);
     ctx.decodeAudioData(ab.slice(0), b=>{ done=true; clearTimeout(to); resolve(b); },
                                e=>{ done=true; clearTimeout(to); reject(e); });
   });
 }
-async function getDecoded(url, timeoutMs){
+async function getDecoded(url, timeoutMs = DECODE_TIMEOUT_MS){
   if (msgBufCache.has(url)) return msgBufCache.get(url);
   if (bufPending.has(url))  return bufPending.get(url);
   const p = (async () => {
     const ab = await getAB(url, timeoutMs);
     return queueDecode(() => decodeAB(ab, timeoutMs));
-  })().then(buf => { msgBufCache.set(url, buf); return buf; }).finally(()=> bufPending.delete(url));
+  })().then(buf => { msgBufCache.set(url, buf); return buf; })
+    .catch(e => { bumpFailure(url); throw e; })
+    .finally(()=> bufPending.delete(url));
   bufPending.set(url, p); return p;
 }
 
 /* Maintain prefetch/decoded horizon */
 function maintainAhead(){
   for (let i=0; i<Math.min(PREFETCH_AHEAD, msgDeck.length); i++){
-    const url = msgDeck[i]; getAB(url, BG_TIMEOUT_MS).catch(()=>{});
+    const url = msgDeck[i]; getAB(url).catch(()=>{});
   }
   let need = DECODE_AHEAD;
   for (let i=0; i<msgDeck.length && need>0; i++){
     const url = msgDeck[i];
     if (!scheduledUrls.includes(url) && !msgBufCache.has(url) && !bufPending.has(url)){
-      getDecoded(url, BG_TIMEOUT_MS).catch(()=>{});
+      getDecoded(url).catch(()=>{});
       need--;
     }
   }
 }
 
-/* Schedule decoded messages */
+/* Schedule decoded messages (out-of-order; no head-of-line block) */
 function scheduleMessages(){
   if (!ctx || schedulingPaused) return;
   const now = ctx.currentTime;
-  while (msgDeck.length){
-    const nextUrl = msgDeck[0];
-    const buf = msgBufCache.get(nextUrl);
-    if (!buf) break;
+  let picksThisPass = 6; // avoid long loops on huge decks
 
-    const earliest = now + SCHEDULE_LEAD_SEC;
+  while (msgDeck.length && picksThisPass-- > 0){
+    const readyIdx = msgDeck.findIndex(u => msgBufCache.has(u));
+    if (readyIdx === -1) break;
+
+    const nextUrl = msgDeck.splice(readyIdx, 1)[0];
+    const buf = msgBufCache.get(nextUrl);
+    if (!buf) continue;
+
+    const earliest = now + (IS_LOW ? 0.6 : 0.4);
     const startAt  = Math.max(msgScheduleTime, earliest);
     const endAt    = startAt + buf.duration;
 
-    msgDeck.shift(); scheduledUrls.push(nextUrl);
+    scheduledUrls.push(nextUrl);
 
     const src = ctx.createBufferSource(); src.buffer = buf;
     const g = ctx.createGain(); src.connect(g); g.connect(msgGain);
 
+    const XFADE_SEC = IS_LOW ? 0.00 : 0.02;
     if (XFADE_SEC > 0){
       g.gain.setValueAtTime(0, startAt);
       g.gain.linearRampToValueAtTime(1, startAt + XFADE_SEC);
@@ -486,8 +499,8 @@ async function playNextAmbientWebAudio(){
   if (!ctx || !ambDeck.length) return;
   const url = ambDeck.shift();
   try{
-    const ab  = await fetchAB(url, BG_TIMEOUT_MS);
-    const buf = await queueDecode(() => decodeAB(ab, BG_TIMEOUT_MS));
+    const ab  = await fetchAB(url);
+    const buf = await queueDecode(() => decodeAB(ab));
     const src = ctx.createBufferSource(); src.buffer = buf; src.connect(ambGain);
     src.onended = () => { ambNode = null; playNextAmbientWebAudio(); };
     const startAt = Math.max(ctx.currentTime + 0.2, 0);
@@ -519,6 +532,8 @@ function startAmbientHTML(){
 }
 
 /* Ambient list */
+const GH = { owner: "listenmachine", repo: "listenmachine", path: "audio/ambient" };
+const API_URL = `https://api.github.com/repos/${GH.owner}/${GH.repo}/contents/${GH.path}`;
 async function loadAmbientList(){
   try{
     const r = await fetch(API_URL, { headers: { "Accept": "application/vnd.github+json" } });
