@@ -213,7 +213,7 @@
     } catch(e){}
   }
 
-  // --- NEW: wake helpers for Firefox frozen frames ---
+  // --- NEW: wake helpers for frozen frames (Firefox, etc.) ---
   function wakeVideos(){
     const cur = vids[i];
     const nxt = vids[(i + 1) % vids.length];
@@ -299,13 +299,13 @@
     if (playBtn) playBtn.addEventListener('click', () => startLoop(BG.firstHoldAfterClickMs), { once: true });
   }
 
-  // Replace visibility handler: assert correct layer, resume play, and wake frames
+  // Assert correct layer on return and wake frames
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
       if (loopStarted){
         vids.forEach((v, k) => v.classList.toggle('show', k === i));
         playOnlyCurrentAndNext(i);
-        wakeVideos(); // force a fresh frame on resume
+        wakeVideos();
       } else if (!window.LM.IS_MOBILE) {
         playOnly(0);
         vids.forEach((v, k) => v.classList.toggle('show', k === 0));
@@ -320,8 +320,8 @@
 <script>
 (() => {
 /* ======= Modes ======= */
-/* Desktop keeps playing in background; mobile saves battery */
-const BACKGROUND_MODE = window.LM.IS_MOBILE ? 'pause' : 'full';
+/* Force FULL routing everywhere so mobile keeps playing with screen locked */
+const BACKGROUND_MODE = 'full';
 
 /* Device heuristics */
 const AMBIENT_VIA_HTML = window.LM.IS_MOBILE;
@@ -342,8 +342,8 @@ const MSG_DELAY_MS   = 6000;
 
 /* Prefetch/decode horizons (adaptive) */
 const PREFETCH_AHEAD = IS_LOW ? 2 : 3;
-/* bump desktop decode horizon for timer-throttle resilience */
-const DECODE_AHEAD   = IS_LOW ? 1 : (window.LM.IS_MOBILE ? 2 : 4);
+/* bump desktop/mobile decode horizon for timer-throttle resilience */
+const DECODE_AHEAD   = IS_LOW ? 1 : 4;
 
 /* Timeouts */
 const MSG_TIMEOUT_MS = 5000;
@@ -380,7 +380,7 @@ let ctx = null, masterGain = null, ambGain = null, msgGain = null, mediaDest = n
 let msgDeck = [], ambDeck = [], ambient = [];
 
 /* Caches */
-const AB_LIMIT = IS_LOW ? 4 : 8;
+const AB_LIMIT = IS_LOW ? 4 : 12;
 const msgABCache  = new Map();
 const msgBufCache = new Map();
 const abPending   = new Map();
@@ -539,14 +539,10 @@ async function tryResumeAndSchedule(){
   maintainAhead(); scheduleMessages();
 }
 
-/* Only pause scheduling in background on MOBILE */
+/* Do NOT pause scheduling on background anymore */
 document.addEventListener('visibilitychange', async () => {
-  if (document.hidden && window.LM.IS_MOBILE && BACKGROUND_MODE === 'pause'){
-    schedulingPaused = true;
-  } else {
-    schedulingPaused = false;
-    tryResumeAndSchedule();
-  }
+  schedulingPaused = false;
+  tryResumeAndSchedule();
 }, {passive:true});
 window.addEventListener('pageshow', tryResumeAndSchedule, {passive:true});
 window.addEventListener('focus', tryResumeAndSchedule, {passive:true});
@@ -561,24 +557,23 @@ playBtn.addEventListener('click', async () => {
     ambGain    = ctx.createGain(); ambGain.gain.value = 1.0;
     msgGain    = ctx.createGain(); msgGain.gain.value = 0.8;
 
-    if (BACKGROUND_MODE === 'full'){
-      /* Route audio through a MediaStream so a real <audio> element can keep it alive in bg */
-      mediaDest = ctx.createMediaStreamDestination();
-      ambGain.connect(masterGain); msgGain.connect(masterGain); masterGain.connect(mediaDest);
-      sinkEl.srcObject = mediaDest.stream;
-    } else {
-      ambGain.connect(masterGain); msgGain.connect(masterGain); masterGain.connect(ctx.destination);
-    }
+    /* Route audio through a MediaStream so a real <audio> element keeps it alive when locked */
+    mediaDest = ctx.createMediaStreamDestination();
+    ambGain.connect(masterGain); msgGain.connect(masterGain); masterGain.connect(mediaDest);
+    sinkEl.srcObject = mediaDest.stream;
 
     if ('mediaSession' in navigator){
-      try { navigator.mediaSession.metadata = new MediaMetadata({ title: 'ListenMachine' }); } catch {}
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({ title: 'ListenMachine' });
+        navigator.mediaSession.playbackState = 'playing';
+      } catch {}
     }
   }
 
   try { await ctx.resume(); } catch { return; }
 
-  /* Ensure the sink actually plays in FULL mode (Firefox background keep-alive) */
-  if (BACKGROUND_MODE === 'full') { try { await sinkEl.play(); } catch(e) {} }
+  /* Ensure the sink actually plays (critical for background/lockscreen) */
+  try { await sinkEl.play(); } catch(e) {}
 
   // Blur/fade title + play
   const root = document.documentElement;
@@ -602,7 +597,7 @@ playBtn.addEventListener('click', async () => {
     startAmbientWebAudio();
   }
 
-  /* Soft watchdog: if FF suspends the context in bg, nudge it */
+  /* Soft watchdog: if a browser suspends the context, nudge it periodically */
   setInterval(() => {
     if (ctx && ctx.state !== 'running') { ctx.resume().catch(()=>{}); }
   }, 15000);
