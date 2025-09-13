@@ -128,7 +128,6 @@
 <body>
 
 <!-- Background videos -->
-<!-- Clouds preloads/auto-plays; others only load metadata until needed -->
 <video id="bgA" class="bgvideo show" muted loop playsinline autoplay preload="auto"     src="media/Clouds4.mp4?v=22"></video>
 <video id="bgB" class="bgvideo"        muted loop playsinline         preload="metadata" src="media/Nightsky.mp4?v=22"></video>
 <video id="bgC" class="bgvideo"        muted loop playsinline         preload="metadata" src="media/Road2.mp4?v=22"></video>
@@ -205,7 +204,6 @@
     vids.forEach((v, k) => { try { (k === idx || k === nextIdx) ? v.play() : v.pause(); } catch(e){} });
   }
 
-  // Pre-arm the next video a moment before the crossfade to avoid a cold start
   function warmNext(next){
     try {
       if (next.preload !== 'auto') next.preload = 'auto';
@@ -213,54 +211,78 @@
     } catch(e){}
   }
 
-  // --- NEW: wake helpers for frozen frames (Firefox, etc.) ---
+  /* ------------ New: robust unfreeze pipeline ------------ */
+  function microSeek(v){ try{ v.currentTime = Math.max(0, (v.currentTime||0) + 0.033); v.play().catch(()=>{});}catch{} }
+  function pausePlay(v){ try{ v.pause(); v.play().catch(()=>{});}catch{} }
+  function hardRefreshVideo(v){
+    try{
+      const wasShowing = v.classList.contains('show');
+      v.classList.remove('show');        // avoid flash
+      v.load();                          // reload same src; loops from start
+      if (wasShowing){
+        setTimeout(()=>{ v.classList.add('show'); v.play().catch(()=>{}); }, 50);
+      }
+    }catch{}
+  }
+
   function wakeVideos(){
     const cur = vids[i];
     const nxt = vids[(i + 1) % vids.length];
-    [cur, nxt].forEach(v => {
-      try{
-        const t = v.currentTime || 0;
-        v.currentTime = Math.max(0, t + 0.001);   // tiny seek to force fresh frame
-        const p = v.play();
-        if (p && p.catch) p.catch(()=>{});
-      }catch(_e){}
-    });
+    [cur, nxt].forEach(v => { microSeek(v); });
+
+    // Verify both actually advanced; if not, escalate
+    setTimeout(() => {
+      [cur, nxt].forEach(v => {
+        try{
+          const t0 = v._lm_t0 ?? 0;
+          const t1 = v.currentTime;
+          if (t1 === t0){ pausePlay(v); }
+          v._lm_t0 = t1;
+          setTimeout(() => {
+            if (v.currentTime === v._lm_t0){ hardRefreshVideo(v); }
+          }, 800);
+        }catch{}
+      });
+    }, 400);
   }
+
   function watchVideo(v){
-    let lastT = -1, stuckTicks = 0;
-    function tick(){
+    let lastMediaTime = -1;
+    let lastPresented = -1;
+    let stuckMs = 0;
+    const STEP1 = 1000, STEP2 = 2500, STEP3 = 5000; // escalate 1s / 2.5s / 5s
+
+    function onTick(now, meta){
       try{
-        if (!v.paused && v.readyState >= 2){
-          const t = v.currentTime;
-          if (t === lastT){
-            stuckTicks++;
-            if (stuckTicks >= 60){        // ~1s at 60Hz
-              v.currentTime = t + 0.001;  // nudge timeline
-              v.play().catch(()=>{});
-              stuckTicks = 0;
-            }
-          } else {
-            stuckTicks = 0;
-            lastT = t;
-          }
+        const pf = meta && typeof meta.presentedFrames === 'number' ? meta.presentedFrames : undefined;
+        const mt = v.currentTime;
+        const advanced = (pf != null) ? (pf !== lastPresented) : (mt !== lastMediaTime);
+
+        const isActiveLayer = v.classList.contains('show');
+
+        if (!v.paused && v.readyState >= 2 && isActiveLayer){
+          if (advanced){ stuckMs = 0; }
+          else { stuckMs += 16.7; } // ~1 frame
+          if (stuckMs >= STEP3){ hardRefreshVideo(v); stuckMs = 0; }
+          else if (stuckMs >= STEP2){ pausePlay(v); }
+          else if (stuckMs >= STEP1){ microSeek(v); }
         } else {
-          stuckTicks = 0;
+          stuckMs = 0;
         }
-      }catch(_e){}
-      if ('requestVideoFrameCallback' in v){
-        v.requestVideoFrameCallback(() => tick());
-      } else {
-        setTimeout(tick, 33);
-      }
+
+        lastMediaTime = mt;
+        if (pf != null) lastPresented = pf;
+      }catch{}
+
+      if ('requestVideoFrameCallback' in v){ v.requestVideoFrameCallback(onTick); }
+      else { setTimeout(() => onTick(0,{}), 33); }
     }
-    if ('requestVideoFrameCallback' in v){
-      v.requestVideoFrameCallback(() => tick());
-    } else {
-      setTimeout(tick, 200);
-    }
+
+    if ('requestVideoFrameCallback' in v){ v.requestVideoFrameCallback(onTick); }
+    else { setTimeout(() => onTick(0,{}), 200); }
   }
   vids.forEach(watchVideo);
-  // --- end NEW ---
+  /* ------------ end unfreeze pipeline ------------ */
 
   function crossfade(){
     const cur = vids[i];
@@ -269,16 +291,15 @@
 
     warmNext(next);
     try { next.play(); } catch(e) {}
+    microSeek(next); // ensure we present a fresh frame at fade start
+
     next.classList.add('show');
     cur.classList.remove('show');
 
     const prevIdx = i;
     i = nextIdx;
 
-    // Pause the previous as soon as its fade completes
     setTimeout(() => { try{ vids[prevIdx].pause(); }catch{} playOnlyCurrentAndNext(i); }, BG.fadeMs + 40);
-
-    // Schedule the next crossfade cycle
     setTimeout(crossfade, BG.displayMs + BG.fadeMs);
   }
 
@@ -292,20 +313,19 @@
   const playBtn = document.getElementById('play');
 
   if (!window.LM.IS_MOBILE) {
-    playOnly(0); // keep Clouds looping
+    playOnly(0);
     if (playBtn) playBtn.addEventListener('click', () => startLoop(BG.firstHoldAfterClickMs), { once: true });
   } else {
     vids.forEach(v => { try{ v.pause(); }catch{} });
     if (playBtn) playBtn.addEventListener('click', () => startLoop(BG.firstHoldAfterClickMs), { once: true });
   }
 
-  // Assert correct layer on return and wake frames
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
       if (loopStarted){
         vids.forEach((v, k) => v.classList.toggle('show', k === i));
         playOnlyCurrentAndNext(i);
-        wakeVideos();
+        wakeVideos(); // escalate if needed
       } else if (!window.LM.IS_MOBILE) {
         playOnly(0);
         vids.forEach((v, k) => v.classList.toggle('show', k === 0));
@@ -319,38 +339,31 @@
 <!-- ===================== AUDIO ===================== -->
 <script>
 (() => {
-/* ======= Modes ======= */
-/* Force FULL routing everywhere so mobile keeps playing with screen locked */
+/* Force FULL routing everywhere so mobile & desktop keep playing in background/lock */
 const BACKGROUND_MODE = 'full';
-
-/* Device heuristics */
 const AMBIENT_VIA_HTML = window.LM.IS_MOBILE;
-
-/* Latency */
 const AUDIO_LATENCY_HINT = window.LM.IS_MOBILE ? 'playback' : 'interactive';
 
-/* Connection/CPU heuristics */
 const conn = navigator.connection || {};
 const HW = navigator.hardwareConcurrency || 4;
 const IS_LOW = window.LM.IS_MOBILE &&
                (conn.saveData || /^(2g|3g)$/i.test(conn.effectiveType || '') || HW <= 4);
 
-/* ======= Tunables ======= */
+/* Tunables */
 const AUDIO_V        = 55;
 const MAX_MSG        = 154;
 const MSG_DELAY_MS   = 6000;
 
-/* Prefetch/decode horizons (adaptive) */
+/* Prefetch/decode horizons */
 const PREFETCH_AHEAD = IS_LOW ? 2 : 3;
-/* bump desktop/mobile decode horizon for timer-throttle resilience */
 const DECODE_AHEAD   = IS_LOW ? 1 : 4;
 
-/* Timeouts (more generous for private/incognito and slow nets) */
+/* Timeouts (private/incognito-friendly) */
 const NET_SLOW = /^(2g|3g)$/i.test(conn.effectiveType || '');
 const FETCH_TIMEOUT_MS  = NET_SLOW ? 70000 : 45000;
 const DECODE_TIMEOUT_MS = 20000;
 
-/* Message list */
+/* Messages */
 const messages = Array.from({length: MAX_MSG}, (_, i) => `audio/messages/${i+1}.mp3`);
 const withV = url => url + (url.includes('?') ? '&' : '?') + 'v=' + AUDIO_V;
 
@@ -369,17 +382,15 @@ function shuffle(a){ const r=a.slice(); for(let i=r.length-1;i>0;i--){const j=Ma
 /* Web Audio graph */
 let ctx = null, masterGain = null, ambGain = null, msgGain = null, mediaDest = null;
 
-/* Decks */
+/* Decks & caches */
 let msgDeck = [], ambDeck = [], ambient = [];
-
-/* Caches */
 const AB_LIMIT = IS_LOW ? 4 : 12;
 const msgABCache  = new Map();
 const msgBufCache = new Map();
 const abPending   = new Map();
 const bufPending  = new Map();
 
-/* Failure tracking (rotate stubborn files) */
+/* Failure rotation */
 const failCount = new Map();
 function bumpFailure(url){
   const n = (failCount.get(url) || 0) + 1;
@@ -401,7 +412,7 @@ let scheduledUrls   = [];
 let schedulingPaused = false;
 let ambNode = null;
 
-/* Fetch helpers */
+/* Fetch/Decode */
 async function fetchAB(url, timeoutMs = FETCH_TIMEOUT_MS){
   const u = withV(url);
   const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -439,7 +450,7 @@ async function getDecoded(url, timeoutMs = DECODE_TIMEOUT_MS){
   bufPending.set(url, p); return p;
 }
 
-/* Maintain prefetch/decoded horizon */
+/* Maintain horizon */
 function maintainAhead(){
   for (let i=0; i<Math.min(PREFETCH_AHEAD, msgDeck.length); i++){
     const url = msgDeck[i]; getAB(url).catch(()=>{});
@@ -454,11 +465,11 @@ function maintainAhead(){
   }
 }
 
-/* Schedule decoded messages (out-of-order; no head-of-line block) */
+/* Out-of-order scheduler (no head-of-line block) */
 function scheduleMessages(){
   if (!ctx || schedulingPaused) return;
   const now = ctx.currentTime;
-  let picksThisPass = 6; // avoid long loops on huge decks
+  let picksThisPass = 6;
 
   while (msgDeck.length && picksThisPass-- > 0){
     const readyIdx = msgDeck.findIndex(u => msgBufCache.has(u));
@@ -489,7 +500,6 @@ function scheduleMessages(){
 
     try { src.start(startAt); } catch {}
     msgScheduleTime = endAt + 0.01;
-
     msgBufCache.delete(nextUrl);
   }
 }
@@ -554,7 +564,7 @@ async function tryResumeAndSchedule(){
   maintainAhead(); scheduleMessages();
 }
 
-/* Do NOT pause scheduling on background anymore */
+/* Don’t pause scheduling in background */
 document.addEventListener('visibilitychange', async () => {
   schedulingPaused = false;
   tryResumeAndSchedule();
@@ -572,7 +582,6 @@ playBtn.addEventListener('click', async () => {
     ambGain    = ctx.createGain(); ambGain.gain.value = 1.0;
     msgGain    = ctx.createGain(); msgGain.gain.value = 0.8;
 
-    /* Route audio through a MediaStream so a real <audio> element keeps it alive when locked */
     mediaDest = ctx.createMediaStreamDestination();
     ambGain.connect(masterGain); msgGain.connect(masterGain); masterGain.connect(mediaDest);
     sinkEl.srcObject = mediaDest.stream;
@@ -586,33 +595,22 @@ playBtn.addEventListener('click', async () => {
   }
 
   try { await ctx.resume(); } catch { return; }
-
-  /* Ensure the sink actually plays (critical for background/lockscreen) */
   try { await sinkEl.play(); } catch(e) {}
 
-  // Blur/fade title + play
   const root = document.documentElement;
   root.style.setProperty('--title-blur', '30px');
   root.style.setProperty('--title-opacity', '0');
   hidePlayAnimated();
 
-  // Build message deck & schedule start
   msgDeck = shuffle(messages).map(u => u);
   msgScheduleTime = ctx.currentTime + (MSG_DELAY_MS / 1000);
 
-  // Maintain + schedule
   const maint = () => { maintainAhead(); scheduleMessages(); };
   maint();
   setInterval(maint, 2000);
 
-  // Ambient
-  if (AMBIENT_VIA_HTML){
-    startAmbientHTML();
-  } else {
-    startAmbientWebAudio();
-  }
+  if (AMBIENT_VIA_HTML){ startAmbientHTML(); } else { startAmbientWebAudio(); }
 
-  /* Soft watchdog: if a browser suspends the context, nudge it periodically */
   setInterval(() => {
     if (ctx && ctx.state !== 'running') { ctx.resume().catch(()=>{}); }
   }, 15000);
