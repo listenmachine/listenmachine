@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>ListenMachine</title>
 <meta name="color-scheme" content="dark light" />
 
@@ -147,8 +147,12 @@
 <audio id="ambEl" preload="auto" playsinline></audio>
 
 <script>
+  // Base platform flags
   window.LM = window.LM || {};
-  window.LM.IS_MOBILE = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+  window.LM.IS_MOBILE  = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+  window.LM.IS_IOS     = /iPad|iPhone|iPod/.test(navigator.userAgent);
+  window.LM.IS_ANDROID = /Android/i.test(navigator.userAgent);
+  window.LM.IS_SAFARI  = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
 </script>
 
 <script>
@@ -178,8 +182,9 @@
 (() => {
   // Tunables
   const BG = {
-    displayMs: window.LM.IS_MOBILE ? 7000  : 5000,
-    fadeMs:    window.LM.IS_MOBILE ? 9000  : 55000, // long desktop crossfade
+    displayMs: window.LM.IS_MOBILE ? 8000  : 5000,
+    // On mobile keep fades short so only one video decodes most of the time
+    fadeMs:    window.LM.IS_MOBILE ? 1200  : 55000, // long crossfade on desktop
     firstHoldAfterClickMs: 15000
   };
 
@@ -189,6 +194,17 @@
   const isLowish = (!window.LM.IS_MOBILE) && (cores <= 4 || /^(2g|3g)$/i.test(conn.effectiveType||''));
   if (isLowish) {
     document.documentElement.style.setProperty('--bg-filter', 'none');
+  }
+
+  // Mobile "lite" mode: no crossfades if the device/network looks weak
+  const saveData   = (navigator.connection && navigator.connection.saveData) || false;
+  const veryLowNet = /^(2g|3g)$/i.test((navigator.connection && navigator.connection.effectiveType) || '');
+  const mobileLite = window.LM.IS_MOBILE && (saveData || veryLowNet || cores <= 4);
+
+  if (mobileLite) {
+    document.documentElement.style.setProperty('--bg-fade-ms', '0ms');
+    BG.fadeMs = 0;
+    BG.displayMs = 12000;
   }
 
   // Keep CSS transition in lockstep with JS fade length
@@ -201,7 +217,7 @@
   function playOnly(idx){ vids.forEach((v,k)=>{ try{ k===idx ? v.play() : v.pause(); }catch(e){} }); }
   function playOnlyCurrentAndNext(idx){
     const nextIdx = (idx + 1) % vids.length;
-    vids.forEach((v, k) => { try { (k === idx || k === nextIdx) ? v.play() : v.pause(); } catch(e){} });
+    vids.forEach((v, k) => { try { (k === idx || (BG.fadeMs>0 && k === nextIdx)) ? v.play() : v.pause(); } catch(e){} });
   }
 
   function warmNext(next){
@@ -211,14 +227,14 @@
     } catch(e){}
   }
 
-  /* ------------ New: robust unfreeze pipeline ------------ */
+  /* ------------ Unfreeze pipeline (kept) ------------ */
   function microSeek(v){ try{ v.currentTime = Math.max(0, (v.currentTime||0) + 0.033); v.play().catch(()=>{});}catch{} }
   function pausePlay(v){ try{ v.pause(); v.play().catch(()=>{});}catch{} }
   function hardRefreshVideo(v){
     try{
       const wasShowing = v.classList.contains('show');
-      v.classList.remove('show');        // avoid flash
-      v.load();                          // reload same src; loops from start
+      v.classList.remove('show');
+      v.load();
       if (wasShowing){
         setTimeout(()=>{ v.classList.add('show'); v.play().catch(()=>{}); }, 50);
       }
@@ -230,7 +246,6 @@
     const nxt = vids[(i + 1) % vids.length];
     [cur, nxt].forEach(v => { microSeek(v); });
 
-    // Verify both actually advanced; if not, escalate
     setTimeout(() => {
       [cur, nxt].forEach(v => {
         try{
@@ -250,19 +265,18 @@
     let lastMediaTime = -1;
     let lastPresented = -1;
     let stuckMs = 0;
-    const STEP1 = 1000, STEP2 = 2500, STEP3 = 5000; // escalate 1s / 2.5s / 5s
+    const STEP1 = 1000, STEP2 = 2500, STEP3 = 5000;
 
     function onTick(now, meta){
       try{
         const pf = meta && typeof meta.presentedFrames === 'number' ? meta.presentedFrames : undefined;
         const mt = v.currentTime;
         const advanced = (pf != null) ? (pf !== lastPresented) : (mt !== lastMediaTime);
-
         const isActiveLayer = v.classList.contains('show');
 
         if (!v.paused && v.readyState >= 2 && isActiveLayer){
           if (advanced){ stuckMs = 0; }
-          else { stuckMs += 16.7; } // ~1 frame
+          else { stuckMs += 16.7; }
           if (stuckMs >= STEP3){ hardRefreshVideo(v); stuckMs = 0; }
           else if (stuckMs >= STEP2){ pausePlay(v); }
           else if (stuckMs >= STEP1){ microSeek(v); }
@@ -291,10 +305,15 @@
 
     warmNext(next);
     try { next.play(); } catch(e) {}
-    microSeek(next); // ensure we present a fresh frame at fade start
+    microSeek(next);
 
-    next.classList.add('show');
-    cur.classList.remove('show');
+    if (BG.fadeMs > 0){
+      next.classList.add('show');
+      cur.classList.remove('show');
+    } else {
+      // hard cut
+      vids.forEach((v,k)=>v.classList.toggle('show', k===nextIdx));
+    }
 
     const prevIdx = i;
     i = nextIdx;
@@ -325,7 +344,7 @@
       if (loopStarted){
         vids.forEach((v, k) => v.classList.toggle('show', k === i));
         playOnlyCurrentAndNext(i);
-        wakeVideos(); // escalate if needed
+        wakeVideos();
       } else if (!window.LM.IS_MOBILE) {
         playOnly(0);
         vids.forEach((v, k) => v.classList.toggle('show', k === 0));
@@ -339,10 +358,11 @@
 <!-- ===================== AUDIO ===================== -->
 <script>
 (() => {
-/* Force FULL routing everywhere so mobile & desktop keep playing in background/lock */
-const BACKGROUND_MODE = 'full';
-const AMBIENT_VIA_HTML = window.LM.IS_MOBILE;
-const AUDIO_LATENCY_HINT = window.LM.IS_MOBILE ? 'playback' : 'interactive';
+/* Platform-aware audio routing */
+const IS_IOS = window.LM.IS_IOS;
+const USE_STREAM_SINK   = IS_IOS;          // iOS benefits from MediaStream → <audio> for lock screen, etc.
+const AMBIENT_VIA_HTML  = IS_IOS;          // iOS keeps ambient in <audio>; Android/Brave mixes in WebAudio
+const AUDIO_LATENCY_HINT= USE_STREAM_SINK ? 'playback' : 'interactive';
 
 const conn = navigator.connection || {};
 const HW = navigator.hardwareConcurrency || 4;
@@ -434,7 +454,8 @@ function getAB(url, timeoutMs = FETCH_TIMEOUT_MS){
 function decodeAB(ab, timeoutMs = DECODE_TIMEOUT_MS){
   return new Promise((resolve, reject) => {
     let done=false; const to=setTimeout(()=>{ if(!done) reject(new Error('decode timeout')); }, timeoutMs);
-    ctx.decodeAudioData(ab.slice(0), b=>{ done=true; clearTimeout(to); resolve(b); },
+    const copy = ab.slice(0); // avoid neutering
+    ctx.decodeAudioData(copy, b=>{ done=true; clearTimeout(to); resolve(b); },
                                e=>{ done=true; clearTimeout(to); reject(e); });
   });
 }
@@ -522,7 +543,7 @@ function startAmbientWebAudio(){
   loadAmbientList().then(() => { if (!ambNode && !AMBIENT_VIA_HTML){ ambDeck = shuffle(ambient); playNextAmbientWebAudio(); } }).catch(()=>{});
 }
 
-/* Mobile HTMLAudio */
+/* Mobile HTMLAudio (kept for iOS) */
 function playNextAmbientHTML(){
   if (!ambient.length){ return; }
   if (!ambDeck.length){ ambDeck = shuffle(ambient); }
@@ -577,14 +598,21 @@ playBtn.addEventListener('click', async () => {
   playBtn.disabled = true;
 
   if (!ctx){
-    ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: AUDIO_LATENCY_HINT });
+    ctx = new (window.AudioContext || window.webkitAudioContext)({
+      latencyHint: AUDIO_LATENCY_HINT,
+      sampleRate: IS_IOS ? undefined : 48000   // Android/Brave often happier at 48 kHz
+    });
     masterGain = ctx.createGain(); masterGain.gain.value = 1.0;
     ambGain    = ctx.createGain(); ambGain.gain.value = 1.0;
     msgGain    = ctx.createGain(); msgGain.gain.value = 0.8;
 
-    mediaDest = ctx.createMediaStreamDestination();
-    ambGain.connect(masterGain); msgGain.connect(masterGain); masterGain.connect(mediaDest);
-    sinkEl.srcObject = mediaDest.stream;
+    if (USE_STREAM_SINK) {
+      mediaDest = ctx.createMediaStreamDestination();
+      ambGain.connect(masterGain); msgGain.connect(masterGain); masterGain.connect(mediaDest);
+      sinkEl.srcObject = mediaDest.stream;
+    } else {
+      ambGain.connect(masterGain); msgGain.connect(masterGain); masterGain.connect(ctx.destination);
+    }
 
     if ('mediaSession' in navigator){
       try {
@@ -595,7 +623,9 @@ playBtn.addEventListener('click', async () => {
   }
 
   try { await ctx.resume(); } catch { return; }
-  try { await sinkEl.play(); } catch(e) {}
+  if (USE_STREAM_SINK) {
+    try { await sinkEl.play(); } catch(e) {}
+  }
 
   const root = document.documentElement;
   root.style.setProperty('--title-blur', '30px');
@@ -611,9 +641,11 @@ playBtn.addEventListener('click', async () => {
 
   if (AMBIENT_VIA_HTML){ startAmbientHTML(); } else { startAmbientWebAudio(); }
 
-  setInterval(() => {
-    if (ctx && ctx.state !== 'running') { ctx.resume().catch(()=>{}); }
-  }, 15000);
+  // Gentle keep-alive hooks without a busy interval
+  document.addEventListener('pointerup', () => { ctx?.resume().catch(()=>{}); }, {passive:true});
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') { ctx?.resume().catch(()=>{}); }
+  }, {passive:true});
 }, { once:true });
 })();
 </script>
