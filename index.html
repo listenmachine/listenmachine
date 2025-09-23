@@ -178,7 +178,6 @@
   window.LM.IS_IOS     = /iPad|iPhone|iPod/.test(navigator.userAgent);
   window.LM.IS_ANDROID = /Android/i.test(navigator.userAgent);
   window.LM.IS_SAFARI  = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-  /* Brave exposes navigator.brave; don't await isBrave() here—sync flag is enough for heuristics */
   window.LM.IS_BRAVE   = !!navigator.brave;
 </script>
 
@@ -448,9 +447,7 @@
 (() => {
 /* Platform-aware audio routing */
 const IS_IOS     = window.LM.IS_IOS;
-const IS_BRAVE   = window.LM.IS_BRAVE;
 const AUDIO_LATENCY_HINT = IS_IOS ? 'playback' : 'interactive';
-
 /* Brave/Android are happiest at 48 kHz; iOS lets the OS choose */
 const AUDIO_SAMPLE_RATE = IS_IOS ? undefined : 48000;
 
@@ -472,6 +469,9 @@ const withV = url => url + (url.includes('?') ? '&' : '?') + 'v=' + AUDIO_V;
 const playBtn = document.getElementById('play');
 const sinkEl  = document.getElementById('sink');
 const ambEl   = document.getElementById('ambEl');
+/* Make sure iOS treats this as a real playback target */
+sinkEl.playsInline = true;
+sinkEl.muted = false;
 
 /* Decks & caches */
 let ctx = null, masterGain = null, ambGain = null, msgGain = null;
@@ -534,7 +534,7 @@ function getAB(url, timeoutMs){
 function decodeAB(ab, timeoutMs = 20000){
   return new Promise((resolve, reject) => {
     let done=false; const to=setTimeout(()=>{ if(!done) reject(new Error('decode timeout')); }, timeoutMs);
-    const copy = ab.slice(0); // avoid neutering
+    const copy = ab.slice(0);
     ctx.decodeAudioData(copy, b=>{ done=true; clearTimeout(to); resolve(b); },
                                e=>{ done=true; clearTimeout(to); reject(e); });
   });
@@ -658,7 +658,7 @@ async function loadAmbientList(){
       .map(it => it.download_url);
   }catch(e){
     console.warn('Ambient fetch failed (Shields or network):', e);
-    ambient = []; // fine: messages still play; ambient optional
+    ambient = []; // messages still play; ambient is optional
   }
 }
 
@@ -692,13 +692,25 @@ playBtn.addEventListener('click', async () => {
     ambGain    = ctx.createGain(); ambGain.gain.value = 1.0;
     msgGain    = ctx.createGain(); msgGain.gain.value = 0.8;
 
-    /* iOS lockscreen route via MediaStream → <audio>; Brave/Chrome go direct */
+    /* Connect graph with iOS stream sink, with robust fallback */
     const USE_STREAM_SINK = IS_IOS;
-    if (USE_STREAM_SINK) {
-      mediaDest = ctx.createMediaStreamDestination();
-      ambGain.connect(masterGain); msgGain.connect(masterGain); masterGain.connect(mediaDest);
-      sinkEl.srcObject = mediaDest.stream;
-    } else {
+    let streamOk = false;
+    if (USE_STREAM_SINK){
+      try{
+        mediaDest = ctx.createMediaStreamDestination();
+        ambGain.connect(masterGain); msgGain.connect(masterGain); masterGain.connect(mediaDest);
+        sinkEl.srcObject = mediaDest.stream;
+        /* CRITICAL: explicitly start the <audio> so iOS pulls the stream */
+        await sinkEl.play();
+        streamOk = true;
+      }catch(e){
+        // Fallback to direct output if MediaStream route fails for any reason
+        try{
+          masterGain.disconnect?.();
+        }catch{}
+      }
+    }
+    if (!streamOk){
       ambGain.connect(masterGain); msgGain.connect(masterGain); masterGain.connect(ctx.destination);
     }
 
@@ -711,7 +723,6 @@ playBtn.addEventListener('click', async () => {
   }
 
   try { await ctx.resume(); } catch { return; }
-  // Brave blocks autoplay with sound by default; we only start audio on user tap (this handler), so OK.
 
   const root = document.documentElement;
   root.style.setProperty('--title-blur', '30px');
@@ -725,7 +736,7 @@ playBtn.addEventListener('click', async () => {
   maint();
   setInterval(maint, 2000);
 
-  /* Ambient: use WebAudio on Brave/Chrome; HTMLAudio on iOS */
+  /* Ambient: use WebAudio on Android/desktop; HTMLAudio on iOS */
   const AMBIENT_VIA_HTML = IS_IOS;
   if (AMBIENT_VIA_HTML){ startAmbientHTML(); } else { startAmbientWebAudio(); }
 
