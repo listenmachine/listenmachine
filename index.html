@@ -191,7 +191,8 @@
 
   const saveData   = (conn && conn.saveData) || false;
   const veryLowNet = /^(2g|3g)$/i.test(conn.effectiveType || '');
-  const mobileLite = IS_MOBILE && (saveData || veryLowNet || cores <= 4);
+  /* IMPORTANT: do NOT penalize devices just because they report <=4 cores (common on iOS) */
+  const mobileLite = IS_MOBILE && (saveData || veryLowNet);
 
   const BG = {
     displayMs: IS_MOBILE ? 9000 : 5000,
@@ -208,7 +209,7 @@
   } else {
     // “Slow but cheap” mobile fade via snapshot canvas
     const MOBILE_SLOW_FADE_MS = 12000; // raise to 20000 for even slower fades
-    const MOBILE_BASE_FADE_MS = 4000;  // conservative fallback
+    const MOBILE_BASE_FADE_MS = 4000;  // conservative fallback if needed later
     const goodNet  = /4g/i.test(conn.effectiveType || '');
     const strongHW = cores >= 6;
 
@@ -348,22 +349,43 @@
     warmNext(next);
 
     if (USE_SNAPSHOT_FADE){
-      // Snapshot the current frame into canvas, pause old video (free decoder),
-      // reveal next video beneath, then fade the snapshot away.
-      try { drawVideoCover(fadeCanvas, fctx, cur); } catch(_e){}
-      try { cur.pause(); } catch(_e){}
+      /* Safari-safe snapshot fade:
+         1) Show+play next first so it's ready beneath.
+         2) Draw current frame to canvas.
+         3) Double-rAF to guarantee the CSS transition runs.
+         4) Pause old video only after fade begins (avoid dead frame). */
       vids.forEach((v,k)=>v.classList.toggle('show', k===nextIdx));
       try { next.play(); } catch(_e){}
 
-      // Ensure snapshot is fully visible before we start fading it OUT
-      fadeCanvas.style.opacity = '1';
-      void fadeCanvas.offsetHeight; // force paint
-      fadeCanvas.style.opacity = '0';
+      const PRIME_MS = 90;
+      const ready = () => new Promise(res => {
+        if (next.readyState >= 2) return res();
+        const onCan = () => { next.removeEventListener('canplay', onCan); res(); };
+        next.addEventListener('canplay', onCan, { once:true });
+        setTimeout(res, PRIME_MS); // best-effort; don't block forever
+      });
 
-      // Cleanup drawn pixels after fade completes
-      setTimeout(() => {
-        try { fctx.clearRect(0,0,fadeCanvas.width, fadeCanvas.height); } catch(_e){}
-      }, BG.fadeMs + 60);
+      ready().then(() => {
+        try { drawVideoCover(fadeCanvas, fctx, cur); } catch(_e){}
+
+        // Ensure transition duration is applied explicitly (helps Safari)
+        fadeCanvas.style.transition = `opacity ${BG.fadeMs}ms linear`;
+        fadeCanvas.style.opacity = '1';
+
+        // Start the fade on the next two animation frames
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            fadeCanvas.style.opacity = '0';
+            // Free the old decoder once the fade actually starts
+            try { cur.pause(); } catch(_e){}
+          });
+        });
+
+        // Cleanup drawn pixels after fade completes
+        setTimeout(() => {
+          try { fctx.clearRect(0,0,fadeCanvas.width, fadeCanvas.height); } catch(_e){}
+        }, BG.fadeMs + 120);
+      });
 
     } else if (BG.fadeMs > 0){
       // Desktop (or non-snapshot path): classic two-video crossfade
