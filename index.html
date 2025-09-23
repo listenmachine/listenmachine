@@ -21,7 +21,7 @@
     --title-opacity: 1;
     --title-fade-ms: 20000ms;
     --bg-filter: saturate(0.95) contrast(0.96) brightness(1.06) blur(0px);
-    /* tied to JS so CSS/JS fade stay in sync */
+    /* tied to JS so CSS/JS fade stay in sync (overridden at runtime) */
     --bg-fade-ms: 20000ms;
   }
 
@@ -183,6 +183,47 @@
 </script>
 
 <script>
+/* ===== Dynamic BG configuration (longer mobile fade without lag) ===== */
+(() => {
+  const IS_MOBILE = window.LM.IS_MOBILE;
+  const conn  = navigator.connection || {};
+  const cores = navigator.hardwareConcurrency || 4;
+
+  const saveData   = (conn && conn.saveData) || false;
+  const veryLowNet = /^(2g|3g)$/i.test(conn.effectiveType || '');
+  const mobileLite = IS_MOBILE && (saveData || veryLowNet || cores <= 4);
+
+  const BG = {
+    displayMs: IS_MOBILE ? 9000 : 5000,
+    fadeMs: 0,
+    firstHoldAfterClickMs: 15000
+  };
+
+  const root = document.documentElement;
+
+  if (mobileLite) {
+    BG.fadeMs = 0;
+    BG.displayMs = 12000;
+    root.style.setProperty('--bg-fade-ms', '0ms');
+  } else {
+    // “Slow but cheap” mobile fade via snapshot canvas
+    const MOBILE_SLOW_FADE_MS = 12000; // raise to 20000 for even slower fades
+    const MOBILE_BASE_FADE_MS = 4000;  // conservative fallback
+    const goodNet  = /4g/i.test(conn.effectiveType || '');
+    const strongHW = cores >= 6;
+
+    const ms = IS_MOBILE ? (goodNet || strongHW ? MOBILE_SLOW_FADE_MS : MOBILE_BASE_FADE_MS)
+                         : 55000; // desktop keeps very long crossfade
+    BG.fadeMs = ms;
+    root.style.setProperty('--bg-fade-ms', ms + 'ms');
+  }
+
+  // Expose for the loop script
+  window.__LM_CONF = { BG, mobileLite, cores, connType: conn.effectiveType || '' };
+})();
+</script>
+
+<script>
 /* -------- Auto-fit title to ONE line -------- */
 (() => {
   const title = document.getElementById('title');
@@ -207,13 +248,14 @@
 <script>
 /* ===== BACKGROUND LOOP ===== */
 (() => {
-  // Tunables
-  const BG = {
-    displayMs: window.LM.IS_MOBILE ? 9000  : 5000,
-    // On mobile we use snapshot fade (cheap) so we can make this pleasantly long
-    fadeMs:    window.LM.IS_MOBILE ? 3000  : 55000, // long crossfade on desktop
+  // Pull dynamic config computed earlier
+  const CONF = window.__LM_CONF || {};
+  const BG = CONF.BG || {
+    displayMs: window.LM.IS_MOBILE ? 9000 : 5000,
+    fadeMs:    window.LM.IS_MOBILE ? 3000 : 55000,
     firstHoldAfterClickMs: 15000
   };
+  const mobileLite = !!CONF.mobileLite;
 
   // Heuristic: on low-power desktops, disable costly per-pixel filter
   const conn = navigator.connection || {};
@@ -221,19 +263,6 @@
   const isLowish = (!window.LM.IS_MOBILE) && (cores <= 4 || /^(2g|3g)$/i.test(conn.effectiveType||''));
   if (isLowish) {
     document.documentElement.style.setProperty('--bg-filter', 'none');
-  }
-
-  // Mobile "lite" mode: no fades if device/network looks very weak
-  const saveData   = (navigator.connection && navigator.connection.saveData) || false;
-  const veryLowNet = /^(2g|3g)$/i.test((navigator.connection && navigator.connection.effectiveType) || '');
-  const mobileLite = window.LM.IS_MOBILE && (saveData || veryLowNet || cores <= 4);
-
-  if (mobileLite) {
-    document.documentElement.style.setProperty('--bg-fade-ms', '0ms');
-    BG.fadeMs = 0;
-    BG.displayMs = 12000;
-  } else {
-    document.documentElement.style.setProperty('--bg-fade-ms', BG.fadeMs + 'ms');
   }
 
   const vids = ['bgA','bgB','bgC','bgD','bgE'].map(id => document.getElementById(id));
@@ -246,8 +275,8 @@
   const fctx = fadeCanvas.getContext('2d', {alpha: false, desynchronized: true});
 
   function drawVideoCover(canvas, ctx, video){
-    // Size canvas to device pixels for crisp fade
-    const dpr = Math.min(window.devicePixelRatio || 1, 2); // clamp for memory
+    // Size canvas to device pixels for crisp fade (lighter DPR on mobile)
+    const dpr = Math.min(window.devicePixelRatio || 1, window.LM.IS_MOBILE ? 1.5 : 2);
     const w = Math.floor(window.innerWidth * dpr);
     const h = Math.floor(window.innerHeight * dpr);
     if (canvas.width !== w || canvas.height !== h){
@@ -328,8 +357,7 @@
 
       // Ensure snapshot is fully visible before we start fading it OUT
       fadeCanvas.style.opacity = '1';
-      // force paint
-      void fadeCanvas.offsetHeight;
+      void fadeCanvas.offsetHeight; // force paint
       fadeCanvas.style.opacity = '0';
 
       // Cleanup drawn pixels after fade completes
@@ -338,7 +366,7 @@
       }, BG.fadeMs + 60);
 
     } else if (BG.fadeMs > 0){
-      // Desktop (or mobileLite false & snapshot disabled): classic two-video crossfade
+      // Desktop (or non-snapshot path): classic two-video crossfade
       try { next.play(); } catch(_e){}
       next.classList.add('show');
       cur.classList.remove('show');
