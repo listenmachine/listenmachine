@@ -15,13 +15,13 @@
 <style>
   :root{
     --ui-alpha: 0.26;
-    --ui-color-live: rgba(255,255,255,var(--ui-alpha)); /* used after bg is playing */
-    --ui-color-boot: rgba(255,255,255,0.92);            /* used before bg is playing */
+    --ui-color-live: rgba(255,255,255,var(--ui-alpha)); /* after bg is playing */
+    --ui-color-boot: rgba(255,255,255,0.92);            /* before bg is playing */
     --title-blur: 0px;
     --title-opacity: 1;
     --title-fade-ms: 20000ms;
     --bg-filter: saturate(0.95) contrast(0.96) brightness(1.06) blur(0px);
-    /* tied to JS so CSS/JS fade stay in sync (overridden at runtime) */
+    /* CSS<->JS sync; runtime override below */
     --bg-fade-ms: 20000ms;
   }
 
@@ -83,16 +83,15 @@
     letter-spacing: 0.18em;
     font-weight: 700;
     line-height: 1.06;
-    color: var(--ui-color-boot);    /* visible on black */
+    color: var(--ui-color-boot);
     user-select: none;
     font-size: 8vw;
     will-change: font-size, filter, opacity;
-    mix-blend-mode: normal;         /* visible on black */
+    mix-blend-mode: normal;
     filter: blur(var(--title-blur));
     opacity: var(--title-opacity);
     transition: filter var(--title-fade-ms) linear, opacity var(--title-fade-ms) linear, color 200ms ease;
   }
-  /* Switch to fancy blend only after a bg frame is confirmed */
   body.bg-live #title{
     color: var(--ui-color-live);
     mix-blend-mode: soft-light;
@@ -110,14 +109,14 @@
     border: none;
     outline: none;
     background: transparent;
-    color: var(--ui-color-boot);    /* visible on black */
+    color: var(--ui-color-boot);
     text-transform: uppercase;
     font-weight: 800;
     letter-spacing: 0.22em;
     font-size: clamp(12px, 2.6vw, 18px);
     line-height: 1;
     cursor: pointer;
-    mix-blend-mode: normal;        /* visible on black */
+    mix-blend-mode: normal;
     isolation: isolate;
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
@@ -145,7 +144,6 @@
   /* Mobile perf: cheaper compositing */
   @media (pointer: coarse), (max-width: 820px){
     :root{ --bg-filter: none; }
-    /* stays visible either way; bg-live will re-enable blends where supported */
   }
 </style>
 </head>
@@ -174,24 +172,25 @@
 <audio id="ambEl" preload="auto" playsinline></audio>
 
 <script>
-  // Base platform flags
+  // Base platform flags (incl. Brave)
   window.LM = window.LM || {};
   window.LM.IS_MOBILE  = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
   window.LM.IS_IOS     = /iPad|iPhone|iPod/.test(navigator.userAgent);
   window.LM.IS_ANDROID = /Android/i.test(navigator.userAgent);
   window.LM.IS_SAFARI  = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+  /* Brave exposes navigator.brave; don't await isBrave() here—sync flag is enough for heuristics */
+  window.LM.IS_BRAVE   = !!navigator.brave;
 </script>
 
 <script>
-/* ===== Dynamic BG configuration (longer mobile fade without lag) ===== */
+/* ===== Dynamic BG configuration (long mobile fade; no lag) ===== */
 (() => {
   const IS_MOBILE = window.LM.IS_MOBILE;
   const conn  = navigator.connection || {};
-  const cores = navigator.hardwareConcurrency || 4;
 
   const saveData   = (conn && conn.saveData) || false;
   const veryLowNet = /^(2g|3g)$/i.test(conn.effectiveType || '');
-  /* IMPORTANT: do NOT penalize devices just because they report <=4 cores (common on iOS) */
+  /* Do NOT penalize devices for reporting low core counts (common on iOS & with anti-fingerprinting). */
   const mobileLite = IS_MOBILE && (saveData || veryLowNet);
 
   const BG = {
@@ -203,24 +202,19 @@
   const root = document.documentElement;
 
   if (mobileLite) {
-    BG.fadeMs = 0;
+    BG.fadeMs = 0;              // user/network preference to keep things light
     BG.displayMs = 12000;
     root.style.setProperty('--bg-fade-ms', '0ms');
   } else {
-    // “Slow but cheap” mobile fade via snapshot canvas
-    const MOBILE_SLOW_FADE_MS = 12000; // raise to 20000 for even slower fades
-    const MOBILE_BASE_FADE_MS = 4000;  // conservative fallback if needed later
-    const goodNet  = /4g/i.test(conn.effectiveType || '');
-    const strongHW = cores >= 6;
-
-    const ms = IS_MOBILE ? (goodNet || strongHW ? MOBILE_SLOW_FADE_MS : MOBILE_BASE_FADE_MS)
-                         : 55000; // desktop keeps very long crossfade
+    // Force a pleasant long fade on mobile; snapshot path keeps it cheap.
+    const MOBILE_SLOW_FADE_MS = 12000; // set 20000 for extra-slow
+    const DESKTOP_FADE_MS     = 55000;
+    const ms = IS_MOBILE ? MOBILE_SLOW_FADE_MS : DESKTOP_FADE_MS;
     BG.fadeMs = ms;
     root.style.setProperty('--bg-fade-ms', ms + 'ms');
   }
 
-  // Expose for the loop script
-  window.__LM_CONF = { BG, mobileLite, cores, connType: conn.effectiveType || '' };
+  window.__LM_CONF = { BG, mobileLite, connType: conn.effectiveType || '' };
 })();
 </script>
 
@@ -249,11 +243,10 @@
 <script>
 /* ===== BACKGROUND LOOP ===== */
 (() => {
-  // Pull dynamic config computed earlier
   const CONF = window.__LM_CONF || {};
   const BG = CONF.BG || {
     displayMs: window.LM.IS_MOBILE ? 9000 : 5000,
-    fadeMs:    window.LM.IS_MOBILE ? 3000 : 55000,
+    fadeMs:    window.LM.IS_MOBILE ? 12000 : 55000,
     firstHoldAfterClickMs: 15000
   };
   const mobileLite = !!CONF.mobileLite;
@@ -261,8 +254,8 @@
   // Heuristic: on low-power desktops, disable costly per-pixel filter
   const conn = navigator.connection || {};
   const cores = navigator.hardwareConcurrency || 4;
-  const isLowish = (!window.LM.IS_MOBILE) && (cores <= 4 || /^(2g|3g)$/i.test(conn.effectiveType||''));
-  if (isLowish) {
+  const isLowishDesktop = (!window.LM.IS_MOBILE) && (cores <= 4 || /^(2g|3g)$/i.test(conn.effectiveType||''));
+  if (isLowishDesktop) {
     document.documentElement.style.setProperty('--bg-filter', 'none');
   }
 
@@ -307,7 +300,6 @@
     } catch(e){}
   }
 
-  /* ------------ Unfreeze pipeline (kept) ------------ */
   function microSeek(v){ try{ v.currentTime = Math.max(0, (v.currentTime||0) + 0.033); v.play().catch(()=>{});}catch{} }
   function pausePlay(v){ try{ v.pause(); v.play().catch(()=>{});}catch{} }
   function hardRefreshVideo(v){
@@ -341,6 +333,26 @@
     }, 400);
   }
 
+  /* Wait for a presented frame on the 'next' video (Safari/Brave-friendly) */
+  function waitPresented(video, timeoutMs = 140){
+    return new Promise(res => {
+      const hasRVFC = typeof video.requestVideoFrameCallback === 'function';
+      let settled = false, to = null, cancel = null;
+      const done = () => { if (settled) return; settled = true; if (to) clearTimeout(to); if (cancel) try{ cancel(); }catch{} res(); };
+      if (hasRVFC){
+        const id = video.requestVideoFrameCallback(() => done());
+        cancel = () => { try{ video.cancelVideoFrameCallback(id); }catch{} };
+      } else if (video.readyState >= 2){
+        done();
+      } else {
+        const onCan = () => { video.removeEventListener('canplay', onCan); done(); };
+        video.addEventListener('canplay', onCan, { once:true });
+        cancel = () => { try{ video.removeEventListener('canplay', onCan); }catch{} };
+      }
+      to = setTimeout(done, timeoutMs);
+    });
+  }
+
   function crossfade(){
     const cur = vids[i];
     const nextIdx = (i + 1) % vids.length;
@@ -349,30 +361,21 @@
     warmNext(next);
 
     if (USE_SNAPSHOT_FADE){
-      /* Safari-safe snapshot fade:
-         1) Show+play next first so it's ready beneath.
-         2) Draw current frame to canvas.
-         3) Double-rAF to guarantee the CSS transition runs.
-         4) Pause old video only after fade begins (avoid dead frame). */
+      // Show+prime next first so it's ready beneath.
       vids.forEach((v,k)=>v.classList.toggle('show', k===nextIdx));
       try { next.play(); } catch(_e){}
+      microSeek(next);
 
-      const PRIME_MS = 90;
-      const ready = () => new Promise(res => {
-        if (next.readyState >= 2) return res();
-        const onCan = () => { next.removeEventListener('canplay', onCan); res(); };
-        next.addEventListener('canplay', onCan, { once:true });
-        setTimeout(res, PRIME_MS); // best-effort; don't block forever
-      });
-
-      ready().then(() => {
+      waitPresented(next).then(() => {
         try { drawVideoCover(fadeCanvas, fctx, cur); } catch(_e){}
 
-        // Ensure transition duration is applied explicitly (helps Safari)
+        // Explicit transition each time (prevents Blink/Safari coalescing)
         fadeCanvas.style.transition = `opacity ${BG.fadeMs}ms linear`;
         fadeCanvas.style.opacity = '1';
+        // Force style & paint before flipping opacity down
+        void fadeCanvas.offsetHeight; getComputedStyle(fadeCanvas).opacity;
 
-        // Start the fade on the next two animation frames
+        // Start the fade on the next two RAFs (Safari/Brave-safe)
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
             fadeCanvas.style.opacity = '0';
@@ -381,7 +384,7 @@
           });
         });
 
-        // Cleanup drawn pixels after fade completes
+        // Cleanup pixels after fade completes
         setTimeout(() => {
           try { fctx.clearRect(0,0,fadeCanvas.width, fadeCanvas.height); } catch(_e){}
         }, BG.fadeMs + 120);
@@ -431,7 +434,6 @@
         playOnlyCurrentAndNext(i);
         wakeVideos();
       } else {
-        // ensure first video is visible/playing after tab returns
         vids.forEach((v, k) => v.classList.toggle('show', k === 0));
         playOnly(0);
         wakeVideos();
@@ -445,29 +447,22 @@
 <script>
 (() => {
 /* Platform-aware audio routing */
-const IS_IOS = window.LM.IS_IOS;
-const USE_STREAM_SINK   = IS_IOS;          // iOS benefits from MediaStream → <audio> for lock screen, etc.
-const AMBIENT_VIA_HTML  = IS_IOS;          // iOS keeps ambient in <audio>; Android/Brave mixes in WebAudio
-const AUDIO_LATENCY_HINT= USE_STREAM_SINK ? 'playback' : 'interactive';
+const IS_IOS     = window.LM.IS_IOS;
+const IS_BRAVE   = window.LM.IS_BRAVE;
+const AUDIO_LATENCY_HINT = IS_IOS ? 'playback' : 'interactive';
+
+/* Brave/Android are happiest at 48 kHz; iOS lets the OS choose */
+const AUDIO_SAMPLE_RATE = IS_IOS ? undefined : 48000;
 
 const conn = navigator.connection || {};
-const HW = navigator.hardwareConcurrency || 4;
-const IS_LOW = window.LM.IS_MOBILE &&
-               (conn.saveData || /^(2g|3g)$/i.test(conn.effectiveType || '') || HW <= 4);
+/* Some privacy modes randomize cores; clamp to a sensible floor so we don't over-throttle */
+const HW = Math.max(navigator.hardwareConcurrency || 4, 4);
+const IS_LOW = window.LM.IS_MOBILE && (conn.saveData || /^(2g|3g)$/i.test(conn.effectiveType || '') || HW <= 4);
 
 /* Tunables */
 const AUDIO_V        = 55;
 const MAX_MSG        = 154;
 const MSG_DELAY_MS   = 6000;
-
-/* Prefetch/decode horizons */
-const PREFETCH_AHEAD = IS_LOW ? 2 : 3;
-const DECODE_AHEAD   = IS_LOW ? 1 : 4;
-
-/* Timeouts (private/incognito-friendly) */
-const NET_SLOW = /^(2g|3g)$/i.test(conn.effectiveType || '');
-const FETCH_TIMEOUT_MS  = NET_SLOW ? 70000 : 45000;
-const DECODE_TIMEOUT_MS = 20000;
 
 /* Messages */
 const messages = Array.from({length: MAX_MSG}, (_, i) => `audio/messages/${i+1}.mp3`);
@@ -478,17 +473,9 @@ const playBtn = document.getElementById('play');
 const sinkEl  = document.getElementById('sink');
 const ambEl   = document.getElementById('ambEl');
 
-function hidePlayAnimated(){
-  if (playBtn.classList.contains('hidden')) return;
-  playBtn.classList.add('fade-out');
-  playBtn.addEventListener('transitionend', () => { playBtn.classList.add('hidden'); }, { once: true });
-}
-function shuffle(a){ const r=a.slice(); for(let i=r.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1)); [r[i],r[j]]=[r[j],r[i]];} return r; }
-
-/* Web Audio graph */
-let ctx = null, masterGain = null, ambGain = null, msgGain = null, mediaDest = null;
-
 /* Decks & caches */
+let ctx = null, masterGain = null, ambGain = null, msgGain = null;
+let mediaDest = null;
 let msgDeck = [], ambDeck = [], ambient = [];
 const AB_LIMIT = IS_LOW ? 4 : 12;
 const msgABCache  = new Map();
@@ -508,6 +495,13 @@ function bumpFailure(url){
   }
 }
 
+function hidePlayAnimated(){
+  if (playBtn.classList.contains('hidden')) return;
+  playBtn.classList.add('fade-out');
+  playBtn.addEventListener('transitionend', () => { playBtn.classList.add('hidden'); }, { once: true });
+}
+function shuffle(a){ const r=a.slice(); for(let i=r.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1)); [r[i],r[j]]=[r[j],r[i]];} return r; }
+
 /* Serial decode queue */
 let decodeTail = Promise.resolve();
 function queueDecode(work){ const p = decodeTail.then(work, work); decodeTail = p.catch(()=>{}); return p; }
@@ -519,7 +513,7 @@ let schedulingPaused = false;
 let ambNode = null;
 
 /* Fetch/Decode */
-async function fetchAB(url, timeoutMs = FETCH_TIMEOUT_MS){
+async function fetchAB(url, timeoutMs = (/^(2g|3g)$/i.test((conn && conn.effectiveType) || '') ? 70000 : 45000)){
   const u = withV(url);
   const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try{
@@ -528,7 +522,7 @@ async function fetchAB(url, timeoutMs = FETCH_TIMEOUT_MS){
     return await res.arrayBuffer();
   } finally { clearTimeout(t); }
 }
-function getAB(url, timeoutMs = FETCH_TIMEOUT_MS){
+function getAB(url, timeoutMs){
   if (msgABCache.has(url)) return Promise.resolve(msgABCache.get(url));
   if (abPending.has(url))  return abPending.get(url);
   const p = fetchAB(url, timeoutMs).then(ab => {
@@ -537,7 +531,7 @@ function getAB(url, timeoutMs = FETCH_TIMEOUT_MS){
   }).catch(e => { abPending.delete(url); bumpFailure(url); throw e; });
   abPending.set(url, p); return p;
 }
-function decodeAB(ab, timeoutMs = DECODE_TIMEOUT_MS){
+function decodeAB(ab, timeoutMs = 20000){
   return new Promise((resolve, reject) => {
     let done=false; const to=setTimeout(()=>{ if(!done) reject(new Error('decode timeout')); }, timeoutMs);
     const copy = ab.slice(0); // avoid neutering
@@ -545,7 +539,7 @@ function decodeAB(ab, timeoutMs = DECODE_TIMEOUT_MS){
                                e=>{ done=true; clearTimeout(to); reject(e); });
   });
 }
-async function getDecoded(url, timeoutMs = DECODE_TIMEOUT_MS){
+async function getDecoded(url, timeoutMs){
   if (msgBufCache.has(url)) return msgBufCache.get(url);
   if (bufPending.has(url))  return bufPending.get(url);
   const p = (async () => {
@@ -558,6 +552,9 @@ async function getDecoded(url, timeoutMs = DECODE_TIMEOUT_MS){
 }
 
 /* Maintain horizon */
+const PREFETCH_AHEAD = IS_LOW ? 2 : 3;
+const DECODE_AHEAD   = IS_LOW ? 1 : 4;
+
 function maintainAhead(){
   for (let i=0; i<Math.min(PREFETCH_AHEAD, msgDeck.length); i++){
     const url = msgDeck[i]; getAB(url).catch(()=>{});
@@ -659,7 +656,10 @@ async function loadAmbientList(){
     ambient = (Array.isArray(items) ? items : [])
       .filter(it => it.type === "file" && /\.mp3$/i.test(it.name))
       .map(it => it.download_url);
-  }catch(e){ console.warn('Ambient fetch failed:', e); ambient = []; }
+  }catch(e){
+    console.warn('Ambient fetch failed (Shields or network):', e);
+    ambient = []; // fine: messages still play; ambient optional
+  }
 }
 
 /* Lifecycle resilience (messages) */
@@ -686,12 +686,14 @@ playBtn.addEventListener('click', async () => {
   if (!ctx){
     ctx = new (window.AudioContext || window.webkitAudioContext)({
       latencyHint: AUDIO_LATENCY_HINT,
-      sampleRate: IS_IOS ? undefined : 48000   // Android/Brave often happier at 48 kHz
+      sampleRate: AUDIO_SAMPLE_RATE
     });
     masterGain = ctx.createGain(); masterGain.gain.value = 1.0;
     ambGain    = ctx.createGain(); ambGain.gain.value = 1.0;
     msgGain    = ctx.createGain(); msgGain.gain.value = 0.8;
 
+    /* iOS lockscreen route via MediaStream → <audio>; Brave/Chrome go direct */
+    const USE_STREAM_SINK = IS_IOS;
     if (USE_STREAM_SINK) {
       mediaDest = ctx.createMediaStreamDestination();
       ambGain.connect(masterGain); msgGain.connect(masterGain); masterGain.connect(mediaDest);
@@ -709,9 +711,7 @@ playBtn.addEventListener('click', async () => {
   }
 
   try { await ctx.resume(); } catch { return; }
-  if (USE_STREAM_SINK) {
-    try { await sinkEl.play(); } catch(e) {}
-  }
+  // Brave blocks autoplay with sound by default; we only start audio on user tap (this handler), so OK.
 
   const root = document.documentElement;
   root.style.setProperty('--title-blur', '30px');
@@ -725,6 +725,8 @@ playBtn.addEventListener('click', async () => {
   maint();
   setInterval(maint, 2000);
 
+  /* Ambient: use WebAudio on Brave/Chrome; HTMLAudio on iOS */
+  const AMBIENT_VIA_HTML = IS_IOS;
   if (AMBIENT_VIA_HTML){ startAmbientHTML(); } else { startAmbientWebAudio(); }
 
   // Gentle keep-alive hooks without a busy interval
