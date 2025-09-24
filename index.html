@@ -1,3 +1,4 @@
+```html
 <!doctype html>
 <html lang="en">
 <head>
@@ -168,7 +169,7 @@
 <button id="play" class="uibtn" type="button" aria-label="Play">PLAY</button>
 
 <!-- Audio sinks -->
-<audio id="sink" preload="auto" playsinline></audio>
+<audio id="sink" preload="auto" playsinline autoplay></audio>
 <audio id="ambEl" preload="auto" playsinline></audio>
 
 <script>
@@ -459,7 +460,8 @@ const IS_LOW = window.LM.IS_MOBILE && (conn.saveData || /^(2g|3g)$/i.test(conn.e
 /* Tunables */
 const AUDIO_V        = 55;
 const MAX_MSG        = 154;
-const MSG_DELAY_MS   = 6000;
+/* Start sooner on mobile so it’s obvious audio is working */
+const MSG_DELAY_MS   = window.LM.IS_MOBILE ? 1500 : 6000;
 
 /* Messages */
 const messages = Array.from({length: MAX_MSG}, (_, i) => `audio/messages/${i+1}.mp3`);
@@ -469,13 +471,20 @@ const withV = url => url + (url.includes('?') ? '&' : '?') + 'v=' + AUDIO_V;
 const playBtn = document.getElementById('play');
 const sinkEl  = document.getElementById('sink');
 const ambEl   = document.getElementById('ambEl');
-/* Make sure iOS treats this as a real playback target */
+/* iOS-friendly flags */
 sinkEl.playsInline = true;
 sinkEl.muted = false;
 
-/* Decks & caches */
+function hidePlayAnimated(){
+  if (playBtn.classList.contains('hidden')) return;
+  playBtn.classList.add('fade-out');
+  playBtn.addEventListener('transitionend', () => { playBtn.classList.add('hidden'); }, { once: true });
+}
+function shuffle(a){ const r=a.slice(); for(let i=r.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1)); [r[i],r[j]]=[r[j],r[i]];} return r; }
+
+/* Web Audio graph */
 let ctx = null, masterGain = null, ambGain = null, msgGain = null;
-let mediaDest = null;
+let mediaDest = null, directOut = null;
 let msgDeck = [], ambDeck = [], ambient = [];
 const AB_LIMIT = IS_LOW ? 4 : 12;
 const msgABCache  = new Map();
@@ -494,13 +503,6 @@ function bumpFailure(url){
     failCount.set(url, 0);
   }
 }
-
-function hidePlayAnimated(){
-  if (playBtn.classList.contains('hidden')) return;
-  playBtn.classList.add('fade-out');
-  playBtn.addEventListener('transitionend', () => { playBtn.classList.add('hidden'); }, { once: true });
-}
-function shuffle(a){ const r=a.slice(); for(let i=r.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1)); [r[i],r[j]]=[r[j],r[i]];} return r; }
 
 /* Serial decode queue */
 let decodeTail = Promise.resolve();
@@ -658,8 +660,17 @@ async function loadAmbientList(){
       .map(it => it.download_url);
   }catch(e){
     console.warn('Ambient fetch failed (Shields or network):', e);
-    ambient = []; // messages still play; ambient is optional
+    ambient = []; // messages still play; ambient optional
   }
+}
+
+/* Tiny silent tick to "unlock" iOS audio pipeline */
+function unlockAudio(ctx, node){
+  try{
+    const b = ctx.createBuffer(1, 1, 22050);
+    const s = ctx.createBufferSource(); s.buffer = b; s.connect(node);
+    s.start(0); s.stop(0); s.disconnect();
+  }catch{}
 }
 
 /* Lifecycle resilience (messages) */
@@ -692,26 +703,31 @@ playBtn.addEventListener('click', async () => {
     ambGain    = ctx.createGain(); ambGain.gain.value = 1.0;
     msgGain    = ctx.createGain(); msgGain.gain.value = 0.8;
 
-    /* Connect graph with iOS stream sink, with robust fallback */
-    const USE_STREAM_SINK = IS_IOS;
-    let streamOk = false;
-    if (USE_STREAM_SINK){
+    // Always connect to direct output first (guarantees sound on all devices)
+    directOut = ctx.createGain(); directOut.gain.value = 1.0;
+    ambGain.connect(masterGain); msgGain.connect(masterGain); masterGain.connect(directOut); directOut.connect(ctx.destination);
+
+    try { await ctx.resume(); } catch(e){ console.warn('ctx.resume failed', e); }
+
+    // Give iOS a nudge
+    unlockAudio(ctx, masterGain);
+
+    // iOS: also try MediaStream → <audio> path for lockscreen/controls.
+    if (IS_IOS){
+      let streamOk = false;
       try{
         mediaDest = ctx.createMediaStreamDestination();
-        ambGain.connect(masterGain); msgGain.connect(masterGain); masterGain.connect(mediaDest);
+        masterGain.connect(mediaDest);
         sinkEl.srcObject = mediaDest.stream;
-        /* CRITICAL: explicitly start the <audio> so iOS pulls the stream */
-        await sinkEl.play();
+        await sinkEl.play(); // critical: pull the stream
         streamOk = true;
       }catch(e){
-        // Fallback to direct output if MediaStream route fails for any reason
-        try{
-          masterGain.disconnect?.();
-        }catch{}
+        console.warn('iOS stream sink failed, staying on direct output', e);
       }
-    }
-    if (!streamOk){
-      ambGain.connect(masterGain); msgGain.connect(masterGain); masterGain.connect(ctx.destination);
+      // If stream path is working, prefer it and avoid double-output
+      if (streamOk){
+        try { masterGain.disconnect(directOut); directOut.disconnect(); } catch {}
+      }
     }
 
     if ('mediaSession' in navigator){
@@ -722,25 +738,25 @@ playBtn.addEventListener('click', async () => {
     }
   }
 
-  try { await ctx.resume(); } catch { return; }
-
+  // Visuals
   const root = document.documentElement;
   root.style.setProperty('--title-blur', '30px');
   root.style.setProperty('--title-opacity', '0');
   hidePlayAnimated();
 
+  // Queue up content
   msgDeck = shuffle(messages).map(u => u);
-  msgScheduleTime = ctx.currentTime + (MSG_DELAY_MS / 1000);
+  msgScheduleTime = (ctx?.currentTime || 0) + (MSG_DELAY_MS / 1000);
 
   const maint = () => { maintainAhead(); scheduleMessages(); };
   maint();
   setInterval(maint, 2000);
 
-  /* Ambient: use WebAudio on Android/desktop; HTMLAudio on iOS */
+  // Ambient: HTMLAudio on iOS; WebAudio elsewhere
   const AMBIENT_VIA_HTML = IS_IOS;
   if (AMBIENT_VIA_HTML){ startAmbientHTML(); } else { startAmbientWebAudio(); }
 
-  // Gentle keep-alive hooks without a busy interval
+  // Keep-alive
   document.addEventListener('pointerup', () => { ctx?.resume().catch(()=>{}); }, {passive:true});
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') { ctx?.resume().catch(()=>{}); }
@@ -750,3 +766,4 @@ playBtn.addEventListener('click', async () => {
 </script>
 </body>
 </html>
+```
