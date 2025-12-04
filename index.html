@@ -610,10 +610,23 @@ function unlockAudio(ctx, node){
   }catch{}
 }
 
-/* Kickstart: play first track ASAP so user hears sound immediately */
+/* Kickstart: play first track ASAP so user hears sound immediately,
+   but choose it from the shuffled deck so it is random each time. */
 async function kickstartFirstTrack(){
   try{
-    const first = messages[0];
+    if (!ctx){
+      return;
+    }
+
+    // Ensure we have a shuffled deck
+    if (!msgDeck || !msgDeck.length){
+      msgDeck = shuffle(messages).map(u => u);
+    }
+
+    // Take the first URL from the shuffled deck
+    const first = msgDeck.shift();
+    if (!first) return;
+
     const buf = await getDecoded(first, 15000);
     const now = ctx.currentTime + 0.05;
     const src = ctx.createBufferSource(); src.buffer = buf;
@@ -625,7 +638,13 @@ async function kickstartFirstTrack(){
   }catch(e){
     console.warn('Kickstart via WebAudio failed, trying HTMLAudio fallback', e);
     try{
-      fbEl.src = withV(messages[0]);
+      let fallbackUrl = null;
+      if (msgDeck && msgDeck.length){
+        fallbackUrl = msgDeck.shift();
+      } else {
+        fallbackUrl = messages[Math.floor(Math.random() * messages.length)];
+      }
+      fbEl.src = withV(fallbackUrl);
       await fbEl.play();
     }catch(_e){}
   }
@@ -704,13 +723,13 @@ playBtn.addEventListener('click', async () => {
 
   // Build deck and start fetching/decoding
   msgDeck = shuffle(messages).map(u => u);
-  // Ensure the first item we kickstarted isn't re-used immediately
-  // (we'll just let scheduler pick ready ones).
+  // The first item we play is taken from this deck in kickstartFirstTrack,
+  // so it will not be reused immediately by the scheduler.
   const maint = () => { maintainAhead(); scheduleMessages(); };
   maint();
   setInterval(maint, 2000);
 
-  // Start audio immediately
+  // Start audio immediately with a random first track
   await kickstartFirstTrack();
 
   // Ambient: HTMLAudio on iOS; WebAudio elsewhere
